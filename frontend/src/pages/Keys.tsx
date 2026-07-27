@@ -23,6 +23,7 @@ export function Keys({ onError }: Props) {
   const [quota, setQuota] = useState("");
   const [busy, setBusy] = useState(false);
   const [newPlaintext, setNewPlaintext] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const load = async () => {
     try {
@@ -91,8 +92,28 @@ export function Keys({ onError }: Props) {
     }
   };
 
-  const copy = () => {
-    if (newPlaintext) navigator.clipboard?.writeText(newPlaintext);
+  const copy = async () => {
+    if (!newPlaintext) return;
+    try {
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(newPlaintext);
+      } else {
+        // Fallback for non-secure contexts (e.g. accessed via host IP, not localhost).
+        const ta = document.createElement("textarea");
+        ta.value = newPlaintext;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      onError("复制失败，请手动选择文本复制");
+    }
   };
 
   return (
@@ -144,13 +165,17 @@ export function Keys({ onError }: Props) {
       </div>
 
       {newPlaintext && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
-          <div className="bg-white rounded-lg p-6 w-96">
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-6 w-96 max-w-[92vw]">
             <h3 className="font-semibold text-slate-800">Key 已创建</h3>
             <p className="mt-2 text-sm text-red-600">明文仅显示这一次，请立即复制保存。</p>
-            <pre className="mt-2 bg-slate-100 rounded p-2 text-xs break-all">{newPlaintext}</pre>
+            <div className="mt-2 bg-slate-100 rounded p-2 text-xs break-all whitespace-pre-wrap font-mono select-all">
+              {newPlaintext}
+            </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={copy} className="px-3 py-1 border rounded text-sm">复制</button>
+              <button onClick={copy} className="px-3 py-1 border rounded text-sm">
+                {copied ? "已复制" : "复制"}
+              </button>
               <button onClick={() => setNewPlaintext(null)} className="px-3 py-1 bg-slate-800 text-white rounded text-sm">
                 我已保存
               </button>
