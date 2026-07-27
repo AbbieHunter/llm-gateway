@@ -250,6 +250,31 @@ cd frontend && npm install && npm run build && npm run dev
 
 ---
 
+## 常见问题（Troubleshooting）
+
+**Q1. 我改了 `.env`（比如换了 `JWT_SECRET` 或填了 `OPENAI_API_KEY`），为什么重启后没生效 / 旧登录仍然有效？**
+A. 容器的环境变量在**创建容器时冻结**。`docker compose restart` 只重启进程、不重建容器，不会重新读取 `.env`。改 `.env` 后必须执行 `docker compose up -d` 重建容器才会生效。如果只想让 `.env` 改动生效、不想动数据，照常用 `up -d` 即可（卷里的数据不会丢）。
+
+**Q2. 我在控制台建的路由别名 / 虚拟 Key，重启后不见了，为什么？**
+A. 这类元数据存在容器内的 SQLite `./data/gateway.db`。早期版本 gateway 服务**未挂卷**，重建容器会清空数据库导致数据丢失。当前 `docker-compose.yml` 已为 gateway 挂载 `./data:/app/data`，正常 `docker compose up -d` / `restart` 数据都在。**唯一会丢的情况是 `docker compose down -v`**（带 `-v` 会删除命名卷）。日常重启不要加 `-v`。备份只需拷贝宿主机 `./data/gateway.db`。
+
+**Q3. 控制台登录正常，但调用模型返回 404 或上游报错？**
+A. 检查别名里的**模型 id 是否真实存在于你配置的端点**。本网关只是把 `openai/<模型id>` 转发给 `OPENAI_API_BASE` 指向的 Provider；若该端点没有这个模型（例如 DashScope 主要托管 qwen 系列，你举例的 `deepseek-r1-distill-qwen-32b` / `glm-4.5-air` 未必在其端点上），上游会返回 404 并原样透传。按 Plan B 设计，这种错误只会标记该候选模型、自动跳过，不影响同前缀其他候选。
+
+**Q4. 某个免费模型额度（如 1M token）用完了，为什么没有自动切到下一个模型？**
+A. 网关的配额感知是**反应式**的：只有当上游**真的返回额度耗尽错误**时，才会标记该模型为 `quota_exhausted` 并在后续请求跳过它。识别依赖错误文案——`classify_error` 只认 `insufficient_quota` / `insufficient_balance` / `quota_exceeded` / `accountbalanceinsufficient` 等**英文串**。若你的 Provider 返回的是中文「余额不足」或纯 `429` 限流，会被归为 `RATE_LIMITED`（走重试/退避），不会触发自动跳过。遇到这种情况，把 Provider 的错误体发我，我在 `app/core/errors.py` 的 `_QUOTA_TOKENS` 里加关键词即可。
+
+**Q5. 为什么被网关先于上游拦在 429？**
+A. 虚拟 Key 有**每日 token 硬限额**（per-key，跨所有模型），与上游各自 1M 额度是两回事。测试期建议把 VK 每日限额设大一点，避免网关在上游额度耗尽之前就把你拦了。
+
+**Q6. 构建 / 拉镜像时报 `EOF` 或拉取超时？**
+A. 多为网络问题（Docker Hub 不可达或被限流）。可改用已缓存的镜像标签（本项目 Dockerfile 用 `python:3.12-slim`），或在有 Docker 访问权限的网络环境下重试。登录 Docker Hub 通常不是必需步骤。
+
+**Q7. 改完前端（控制台 UI）后，刷新页面没看到变化？**
+A. 前端是构建进镜像的静态资源。改了 `frontend/src` 后需要 `docker compose up -d --build` 重建镜像，单纯 `restart` 不会重新构建前端。
+
+---
+
 ## 文档
 
 - `docs/product/`：PRD、产品设计、用户故事
