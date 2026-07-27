@@ -223,6 +223,88 @@ curl http://localhost:8000/v1/chat/completions \
 
 ---
 
+## 在外部项目中调用网关
+
+网关对外就是**标准 OpenAI 兼容协议**，任何支持 OpenAI SDK 的项目都能直接替换 `base_url` 与 `api_key` 接入，无需改动业务逻辑。下面以「别名 `free` + 账号 Bob 的虚拟 Key」为例。
+
+### 关键参数
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `base_url` | `http://localhost:8000/v1` | 网关 OpenAI 兼容端点（`/v1` 前缀由网关内部处理，填到 SDK 的 `base_url` 时**不带** `/chat/completions`） |
+| `api_key` | Bob 的虚拟 Key 明文 | 即控制台 Keys 页创建时返回的 VK（只显示一次）；网关 SHA-256 后查库鉴权 |
+| `model` | `free` | 路由别名，不是底层模型 id |
+| `Authorization` | `Bearer <VK>` | 走 HTTP 头，不用 SDK 时手动带 |
+
+> 鉴权只看虚拟 Key，**与 Key 归属账号（Bob）的 RBAC 角色无关**：用 Bob 的 VK 调 `/v1/chat/completions` 不会触发「账号权限」校验，Bob 是 user 还是 admin 不影响 API 调用。RBAC 只约束**控制台网页登录**的可见范围。
+
+### Python（OpenAI SDK）
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:8000/v1",   # 网关地址
+    api_key="<Bob的虚拟Key>",              # 这里是 VK，不是 Provider key
+)
+
+# 非流式
+resp = client.chat.completions.create(
+    model="free",                          # 路由别名
+    messages=[{"role": "user", "content": "你好"}],
+)
+print(resp.choices[0].message.content)
+
+# 流式
+stream = client.chat.completions.create(
+    model="free",
+    messages=[{"role": "user", "content": "讲个笑话"}],
+    stream=True,
+)
+for chunk in stream:
+    if chunk.choices and chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="", flush=True)
+```
+
+### Node.js / 其他框架
+
+任意支持 `baseURL` + `apiKey` 的 OpenAI 兼容库同理（如 `openai` npm 包、`langchain` 的 `ChatOpenAI`、LlamaIndex 等），只需把 `baseURL` 指向 `http://localhost:8000/v1`、`apiKey` 填 VK、`model` 填别名。
+
+```javascript
+import OpenAI from "openai";
+const client = new OpenAI({
+  baseURL: "http://localhost:8000/v1",
+  apiKey: "<Bob的虚拟Key>",
+});
+const resp = await client.chat.completions.create({
+  model: "free",
+  messages: [{ role: "user", content: "你好" }],
+  stream: true,
+});
+for await (const chunk of resp) {
+  process.stdout.write(chunk.choices[0]?.delta?.content ?? "");
+}
+```
+
+### 网关与上游在同一机器但跑在 Docker 里
+
+若调用方（你的项目）**也**在 Docker 容器中，用 `localhost:8000` 会指向容器自身而非宿主机网关。改用宿主网关的特殊域名：
+
+```
+base_url = http://host.docker.internal:8000/v1
+```
+
+（Docker Desktop 默认支持 `host.docker.internal`；Linux 原生 Docker 需在 `docker run` 加 `--add-host=host.docker.internal:host-gateway`。）
+
+### 调用后会遇到什么
+
+- **每日额度 429**：虚拟 Key 有**每日 token 硬限额**（per-key，跨所有模型）。超额时网关返回 `429` 并带 `Retry-After`。测试期把 VK 每日限额设大，避免在上游 1M 额度耗尽前就被网关拦住。
+- **failover 自动生效**：若 `free` 别名下某候选模型被上游标记额度耗尽，网关自动切到下一个候选，调用方无感知（仍用 `model: "free"` 即可）。
+- **候选须真实存在**：别名里的模型 id 必须真实存在于你配置的 Provider 端点，否则上游 404 会原样透传（按 Plan B 只标记该候选，不影响同前缀其他候选）。
+- **错误响应仍是 OpenAI 格式**：流式中途出错时网关会补发一个 OpenAI 错误 event（`{"error": {...}}`），不会静默断流，SDK 可正常捕获。
+
+---
+
 ## 本地开发（无 Docker）
 
 ```bash
