@@ -80,6 +80,28 @@
 
 > ⚠️ **改 `.env` 后必须 `docker compose up -d` 重建容器**，`docker compose restart` 不会重载环境变量。
 
+### 数据持久化（重要，别踩坑）
+
+网关的**所有控制台业务数据**——账号、虚拟 Key、路由别名（alias）、Provider 前缀、用量记录——都存储在容器内的 SQLite 数据库 `./data/gateway.db`（`WORKDIR=/app`，即 `/app/data/gateway.db`）。
+
+`docker-compose.yml` 已为 `gateway` 服务挂载了卷：
+
+```yaml
+services:
+  gateway:
+    volumes:
+      - ./data:/app/data   # 元数据持久化到宿主机，重建容器不丢失
+```
+
+因此：
+
+- ✅ **`docker compose up -d` 重建容器后，数据仍在**（卷在宿主机的 `./data` 目录）。第一次部署时会自动创建 `./data` 目录。
+- ✅ **备份很简单**：停止服务后直接拷贝宿主机上的 `./data/gateway.db` 即可（该目录已被 `.gitignore` 排除，不会进 git）。
+- ⚠️ **`docker compose down -v` 会删除命名卷**；若你执行了带 `-v` 的 down，SQLite 数据会丢失（Redis 的 `redis-data`、Ollama 的 `ollama-data` 同理）。日常重启用 `docker compose up -d` / `restart` 即可，不要加 `-v`。
+- ℹ️ **运行时状态与计数不在此库**：额度耗尽标记、熔断状态、语义缓存、用量计数都存于 **Redis**（已挂 `redis-data` 卷）。即使元数据库重建，这些也不受影响。
+
+> 真实教训：早期 `gateway` 服务**没有挂卷**，数据库只活在容器可写层，一次 `docker compose up -d` 重建容器后，新建的路由别名全部丢失（空库会按 `BOOTSTRAP_ADMIN_PASSWORD` 重建 admin 账号，但别名/Key 不在 bootstrap 范围内）。现已修复并挂卷，数据可持久保存。
+
 ### 第三方兼容端点（以 DashScope 为例）
 ```
 OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
