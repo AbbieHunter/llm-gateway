@@ -90,14 +90,23 @@ export function App() {
     },
   ];
 
+  // Non-admin accounts only ever see the 用量报表 (Usage) page; admins see all.
+  const visibleNav = isAdmin ? nav : nav.filter((n) => n.key === "usage");
+  const visibleKeys = new Set(visibleNav.map((n) => n.key));
+
+  // Clamp the active view to something this role may see (e.g. a freshly
+  // logged-in non-admin should land on 用量报表, not 概览).
+  useEffect(() => {
+    if (user && !visibleKeys.has(view)) setView("usage");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
   return (
     <div className="min-h-screen flex bg-slate-50">
       <aside className="w-56 bg-slate-900 text-slate-200 flex flex-col">
         <div className="px-4 py-4 text-lg font-semibold text-white">LLM Gateway</div>
         <nav className="flex-1 px-2 space-y-1">
-          {nav
-            .filter((n) => !n.adminOnly || isAdmin)
-            .map((n) => {
+          {visibleNav.map((n) => {
               const active = view === n.key;
               return (
                 <button
@@ -136,12 +145,12 @@ export function App() {
             </header>
           );
         })()}
-        {view === "dashboard" && <Dashboard user={user} onError={setError} />}
-        {view === "keys" && <Keys onError={setError} />}
-        {view === "usage" && <Usage isAdmin={isAdmin} onError={setError} />}
-        {view === "providers" && <Providers onError={setError} />}
-        {view === "routes" && <Routes onError={setError} />}
-        {view === "accounts" && <Accounts onError={setError} />}
+        {visibleKeys.has("dashboard") && view === "dashboard" && <Dashboard user={user} onError={setError} />}
+        {visibleKeys.has("keys") && view === "keys" && <Keys onError={setError} />}
+        {visibleKeys.has("usage") && view === "usage" && <Usage isAdmin={isAdmin} onError={setError} />}
+        {visibleKeys.has("providers") && view === "providers" && <Providers onError={setError} />}
+        {visibleKeys.has("routes") && view === "routes" && <Routes onError={setError} />}
+        {visibleKeys.has("accounts") && view === "accounts" && <Accounts onError={setError} />}
       </main>
     </div>
   );

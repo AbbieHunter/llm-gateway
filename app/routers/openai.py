@@ -171,6 +171,7 @@ async def _nonstream_response(
             await log_usage(
                 vk_id=vk.vk_id,
                 account_id=vk.account_id,
+                route_alias=req.model,
                 model=model_used,
                 prompt_tokens=usage["prompt_tokens"],
                 completion_tokens=usage["completion_tokens"],
@@ -198,6 +199,7 @@ async def _nonstream_response(
             await log_usage(
                 vk_id=vk.vk_id,
                 account_id=vk.account_id,
+                route_alias=req.model,
                 model=model_used,
                 prompt_tokens=usage["prompt_tokens"],
                 completion_tokens=usage["completion_tokens"],
@@ -359,7 +361,7 @@ async def _stream_response(
         await set_status(candidate, "healthy")
         await record_outcome(candidate, True)
         return StreamingResponse(
-            _sse_generator(stream, first, candidate, vk, messages, request, start),
+            _sse_generator(stream, first, candidate, vk, messages, request, start, alias=req.model),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -412,6 +414,7 @@ async def _sse_generator(
     messages: list[dict[str, Any]],
     request: Request,
     start: float,
+    alias: str | None = None,
 ) -> Any:
     completion_tokens = 0
     model_used = candidate
@@ -448,6 +451,7 @@ async def _sse_generator(
             await log_usage(
                 vk_id=vk.vk_id,
                 account_id=vk.account_id,
+                route_alias=alias,
                 model=model_used,
                 prompt_tokens=pt,
                 completion_tokens=completion_tokens,

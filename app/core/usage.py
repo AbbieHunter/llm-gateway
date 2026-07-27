@@ -54,6 +54,7 @@ async def log_usage(
     prompt_tokens: int,
     completion_tokens: int,
     status: str,
+    route_alias: str | None = None,
     latency_ms: int | None = None,
     cost_usd: float | None = None,
     cost_is_estimated: bool = False,
@@ -63,6 +64,7 @@ async def log_usage(
     row = UsageLog(
         vk_id=vk_id,
         account_id=account_id,
+        route_alias=route_alias,
         model=model,
         provider=provider_of(model),
         prompt_tokens=prompt_tokens,

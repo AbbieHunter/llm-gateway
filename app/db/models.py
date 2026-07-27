@@ -61,6 +61,9 @@ class UsageLog(Base):
     id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
     vk_id: Mapped[str | None] = mapped_column(String, nullable=True)
     account_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The alias the caller requested (e.g. "free"), distinct from `model`
+    # which is the actual underlying model that served the request.
+    route_alias: Mapped[str | None] = mapped_column(String, nullable=True)
     model: Mapped[str | None] = mapped_column(String, nullable=True)
     provider: Mapped[str | None] = mapped_column(String, nullable=True)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)

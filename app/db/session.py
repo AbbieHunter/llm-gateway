@@ -39,6 +39,12 @@ async def init_db() -> None:
             await conn.execute(
                 text("ALTER TABLE virtual_keys ADD COLUMN daily_token_quota INTEGER")
             )
+        # M5: usage_logs gains `route_alias` (the requested alias vs the actual
+        # model). Additive ALTER so existing DBs pick it up without a full rebuild.
+        if not await _column_exists(conn, "usage_logs", "route_alias"):
+            await conn.execute(
+                text("ALTER TABLE usage_logs ADD COLUMN route_alias STRING")
+            )
 
 
 async def _column_exists(conn, table: str, column: str) -> bool:

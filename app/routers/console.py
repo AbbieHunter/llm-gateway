@@ -430,6 +430,7 @@ _logger = logging.getLogger("gateway")
 # --- M4 T-03: CSV export limits (R6) ---
 _MAX_CSV_DAYS = 90          # max query window for export
 _MAX_CSV_ROWS = 100_000     # max aggregated rows in a single CSV
+_DETAIL_LIMIT = 500         # max raw call-log rows returned in the 明细 view
 
 
 def _csv_cell(v) -> str:
@@ -466,6 +467,14 @@ def _usage_rows_to_csv(rows: list[dict], group_by: str) -> str:
                 _csv_cell(r.get("date")), r.get("calls", 0), r.get("total_tokens", 0),
                 r.get("cost_usd", 0), r.get("error_rate", 0), bool(r.get("cost_is_estimated")),
             ])
+    elif group_by == "account":
+        w.writerow(["username", "account_id", "calls", "total_tokens", "cost_usd", "error_rate", "cost_is_estimated"])
+        for r in rows:
+            w.writerow([
+                _csv_cell(r.get("username")), _csv_cell(r.get("account_id")),
+                r.get("calls", 0), r.get("total_tokens", 0), r.get("cost_usd", 0),
+                r.get("error_rate", 0), bool(r.get("cost_is_estimated")),
+            ])
     else:  # key (default)
         w.writerow(["vk_id", "calls", "total_tokens", "cost_usd", "error_rate", "cost_is_estimated"])
         for r in rows:
@@ -485,6 +494,7 @@ async def usage(
     to_date: str | None = None,
     group_by: str = "key",
     range: str = "week",
+    view: str = "agg",
     format: str = "json",
     db: AsyncSession = Depends(get_db),
     account: Account = Depends(get_current_account),
@@ -495,9 +505,12 @@ async def usage(
       any `scope=global` / `account_id` / `vk_id` param from a non-admin is
       rejected with 403 + a security log — R2).
     - Admin: may pass `?scope=global` for everything, or `?vk_id=` to drill down.
-    - `group_by` (R5): `key` (default) | `model` | `time`. `range` (R5): `day` |
-      `week` (default, ~7d) | `month` (~30d) sets the date window when `from_date`
-      is not given.
+    - `group_by` (R5): `key` (default) | `model` | `time` | `account`
+      (`account` only valid for admin + global — per-user totals with username).
+    - `range` (R5): `day` | `week` (default, ~7d) | `month` (~30d) sets the date
+      window when `from_date` is not given.
+    - `view`: `agg` (default, aggregated) | `detail` (raw per-call log — time,
+      alias, actual model, tokens, status, and username when global).
     """
     is_admin = account.role == "admin"
     if not is_admin and (scope == "global" or account_id or vk_id):
@@ -518,6 +531,14 @@ async def usage(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="format must be json or csv"
         )
+    if view not in ("agg", "detail"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="view must be agg or detail"
+        )
+
+    # `account` grouping only makes sense for admin + global; downgrade otherwise.
+    if group_by == "account" and not (is_admin and scope == "global"):
+        group_by = "key"
 
     # Derive the date window from `range` unless an explicit from_date is given.
     if from_date is None and range in ("day", "week", "month"):
@@ -553,6 +574,36 @@ async def usage(
     q = q.order_by(UsageLog.created_at.desc())
     rows = (await db.execute(q)).scalars().all()
 
+    # ---- detail view: one row per call ----
+    if view == "detail":
+        usernames: dict[str, str] = {}
+        if is_admin and scope == "global":
+            for a in (await db.execute(select(Account.id, Account.username))).all():
+                usernames[a[0]] = a[1]
+        detail_rows = []
+        for r in rows[:_DETAIL_LIMIT]:
+            detail_rows.append(
+                {
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "route_alias": r.route_alias,
+                    "model": r.model,
+                    "provider": r.provider,
+                    "prompt_tokens": r.prompt_tokens or 0,
+                    "completion_tokens": r.completion_tokens or 0,
+                    "total_tokens": (r.prompt_tokens or 0) + (r.completion_tokens or 0),
+                    "status": r.status,
+                    "vk_id": r.vk_id,
+                    "account_id": r.account_id,
+                    "username": (
+                        usernames.get(r.account_id)
+                        if (is_admin and scope == "global")
+                        else None
+                    ),
+                }
+            )
+        return {"group_by": "detail", "rows": detail_rows}
+
+    # ---- aggregated view ----
     if group_by == "model":
         def gkey(r):
             return r.model or "unknown"
@@ -563,6 +614,11 @@ async def usage(
             return r.created_at.strftime("%Y-%m-%d") if r.created_at else "unknown"
         def glabel(v):
             return {"date": v}
+    elif group_by == "account":
+        def gkey(r):
+            return r.account_id or "unknown"
+        def glabel(v):
+            return {"account_id": v}
     else:  # key (default)
         def gkey(r):
             return r.vk_id or "unknown"
@@ -589,6 +645,16 @@ async def usage(
         if r.status != "success":
             a["errors"] += 1
         a["cost_is_estimated"] = a["cost_is_estimated"] or bool(r.cost_is_estimated)
+
+    # Attach usernames for the per-account aggregation.
+    if group_by == "account":
+        accts = {
+            a.id: a.username
+            for a in (await db.execute(select(Account.id, Account.username))).scalars().all()
+        }
+        for k, a in agg.items():
+            a["username"] = accts.get(k, k if k != "unknown" else "未知账号")
+
     for a in agg.values():
         a["error_rate"] = round(a["errors"] / a["calls"], 4) if a["calls"] else 0.0
         a.pop("errors", None)
