@@ -65,10 +65,11 @@
    - `OPENAI_API_KEY`（你的 Provider key）
    - `OPENAI_API_BASE`（第三方兼容端点，见下）
 
-2. 启动全栈（Redis + Ollama 语义缓存 embedding + Gateway）：
+2. 启动全栈（Redis + Ollama 语义缓存 embedding + Gateway）。`--build` 会构建 gateway 镜像，并在镜像内**自动打包前端 SPA**（无需手动 `npm run build`）：
    ```bash
-   docker compose up -d
+   docker compose up -d --build
    ```
+   > 后续更新代码后部署也用这条命令即可。Docker 按层缓存：只有改了 `frontend/` 源码或 `package.json` 时才会重新 `npm install` + `npm run build`；纯后端改动直接复用缓存、秒过。
 
 3. 检查健康：
    ```bash
@@ -78,7 +79,7 @@
 
 4. 打开控制台：浏览器访问 **http://localhost:8000**，用 `admin` + 你设置的 `BOOTSTRAP_ADMIN_PASSWORD` 登录。
 
-> ⚠️ **改 `.env` 后必须 `docker compose up -d` 重建容器**，`docker compose restart` 不会重载环境变量。
+> ⚠️ **改 `.env` 或改代码后，用 `docker compose up -d --build` 重建**（`restart` 不会重载环境变量、也不会重新构建前端）。
 
 ### 数据持久化（重要，别踩坑）
 
@@ -365,7 +366,7 @@ A. 虚拟 Key 有**每日 token 硬限额**（per-key，跨所有模型），与
 A. 多为网络问题（Docker Hub 不可达或被限流）。可改用已缓存的镜像标签（本项目 Dockerfile 用 `python:3.12-slim`），或在有 Docker 访问权限的网络环境下重试。登录 Docker Hub 通常不是必需步骤。
 
 **Q7. 改完前端（控制台 UI）后，刷新页面没看到变化？**
-A. 前端是构建进镜像的静态资源。改了 `frontend/src` 后需要 `docker compose up -d --build` 重建镜像，单纯 `restart` 不会重新构建前端。
+A. 前端在构建镜像时由 `Dockerfile` 自动打包进 `app/static/dist`，**无需手动 `npm run build`**。改了 `frontend/src` 后执行 `docker compose up -d --build` 重建镜像即可（Docker 按层缓存，只有前端源码 / `package.json` 变了才真正重跑构建，单纯 `restart` 不会重新构建前端）。
 
 **Q8. 我用某个虚拟 Key 调了一次网关，但在用量报表里看不到这条记录？**
 A. 两个常见原因：① **查看范围**：用量报表默认只显示**当前登录账号**自己的用量。如果这次调用用的是**别的账号**的 VK（比如用 Bob 的 VK 调，却用 admin 登录看），admin 视角默认看不到——请勾选右上角「**全局视角**」即可看到所有账号的记录。② **页面不自动刷新**：报表页不会自动轮询，切换标签页 / 时间范围 / 勾选全局视角会重新查询；若一直停在原页面，刷新浏览器（Cmd+R）即可。提示：明细视图里能看到每次调用的「别名」与「实际模型」，可据此核对。

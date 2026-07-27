@@ -10,6 +10,7 @@ __pycache__
 data
 node_modules
 frontend/node_modules
+app/static/dist
 *.db
 *.sqlite
 *.sqlite3
