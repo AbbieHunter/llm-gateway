@@ -1,0 +1,10 @@
+fastapi>=0.110,<0.112
+uvicorn[standard]>=0.29,<0.31
+litellm>=1.67,<2.0  # 1.45- 仍 import imghdr（Python 3.13 已移除），会导致运行时导入失败
+pydantic>=2.7,<3.0
+python-dotenv>=1.0,<2.0
+# M1: pure-python deps only (no native extensions, R2)
+sqlalchemy>=2.0,<3.0
+aiosqlite>=0.19,<0.21
+pyjwt>=2.8,<3.0
+redis>=5.0,<6.0  # optional in M1; provider health status (§2.8)

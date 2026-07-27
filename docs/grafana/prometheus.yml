@@ -1,0 +1,15 @@
+# Prometheus scrape config snippet for the LLM Gateway /metrics endpoint (M4, R7).
+# Merge the `scrape_configs` block below into your prometheus.yml, then
+# import docs/grafana/dashboard.json into Grafana. The gateway does NOT bundle
+# Prometheus/Grafana — self-host them.
+
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: llm-gateway
+    metrics_path: /metrics
+    static_configs:
+      # Point this at wherever the gateway is reachable. /metrics is open by
+      # default but exposes only aggregate counters (no VK / PII / secrets).
+      - targets: ["localhost:8000"]

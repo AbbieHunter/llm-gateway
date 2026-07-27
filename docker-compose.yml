@@ -1,0 +1,81 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis-data:/data
+
+  # M4 semantic-cache embedding backend.
+  # DEFAULT: Ollama — a prebuilt image (no torch build) that serves
+  # BAAI/bge-small-zh-v1.5 via an OpenAI-compatible /v1/embeddings API.
+  # The embedding-pull service downloads the model on first boot.
+  # (Alternative from-source torch server: see deploy/embedding-server/)
+  embedding:
+    image: ollama/ollama
+    restart: unless-stopped
+    ports:
+      - "8001:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  embedding-pull:
+    image: ollama/ollama
+    depends_on:
+      embedding:
+        condition: service_started
+    environment:
+      - OLLAMA_HOST=http://embedding:11434
+    entrypoint:
+      - "sh"
+      - "-c"
+      - "until ollama list >/dev/null 2>&1; do sleep 2; done; ollama pull quentinz/bge-small-zh-v1.5; echo PULL_DONE"
+    restart: "no"
+
+  gateway:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      embedding-pull:
+        condition: service_completed_successfully
+    # Production wiring: real Redis + real bge embedding server. These override
+    # any REDIS_FAKE/MOCK_PROVIDER accidentally left in .env.
+    environment:
+      - REDIS_FAKE=0
+      - MOCK_PROVIDER=0
+      - REDIS_URL=redis://redis:6379
+      - SEMANTIC_CACHE_ENABLE=1
+      - SEMANTIC_EMBEDDING_MODEL=quentinz/bge-small-zh-v1.5
+      - SEMANTIC_EMBEDDING_API_BASE=http://embedding:11434/v1
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  redis-data:
+  ollama-data:

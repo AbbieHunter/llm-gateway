@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Environment (secrets)
+.env
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# Build artifacts — keep the committed fallback index.html
+app/static/dist/*
+!app/static/dist/index.html
+
+# OS
+.DS_Store
+
+# Runtime DB (M1, SQLite file under ./data)
+data/
+
+# Local working memory (project notes, not source) — never push
+.workbuddy/
+
+# Test caches
+.pytest_cache/

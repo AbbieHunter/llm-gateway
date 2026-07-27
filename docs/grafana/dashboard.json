@@ -1,0 +1,62 @@
+{
+  "title": "LLM Gateway (M4)",
+  "uid": "llm-gateway-m4",
+  "schemaVersion": 39,
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Requests / 5m",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(gateway_requests_total[5m])) by (status)", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "p95 Latency (s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "avg(gateway_request_latency_seconds_p95) by (provider)", "legendFormat": "{{provider}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Token Throughput / 5m",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "sum(rate(gateway_tokens_total[5m])) by (provider)", "legendFormat": "{{provider}}" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Cache Hit Rate",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "sum(rate(gateway_cache_hits_total[5m])) / sum(rate(gateway_requests_total[5m]))", "legendFormat": "hit_rate" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Provider Status",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "max by (provider, status) (gateway_provider_status)", "legendFormat": "{{provider}}/{{status}}" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Quota Marks / 5m",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "targets": [
+        { "expr": "sum(rate(gateway_quota_marked_total[5m])) by (provider)", "legendFormat": "{{provider}}" }
+      ]
+    }
+  ]
+}
