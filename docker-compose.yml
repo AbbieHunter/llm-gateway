@@ -75,6 +75,12 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+    # Persist the SQLite metadata DB (accounts, virtual keys, routes/aliases,
+    # usage logs, providers). WITHOUT this, /app/data lives only in the
+    # container's writable layer and is wiped on every `up -d` recreation —
+    # losing all aliases/keys you create in the console.
+    volumes:
+      - ./data:/app/data
 
 volumes:
   redis-data:
