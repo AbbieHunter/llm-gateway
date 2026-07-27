@@ -103,19 +103,11 @@ export function App() {
                 <button
                   key={n.key}
                   onClick={() => setView(n.key)}
-                  title={n.desc}
                   className={`w-full text-left px-3 py-2 rounded ${
                     active ? "bg-slate-700 text-white" : "hover:bg-slate-800 text-slate-200"
                   }`}
                 >
                   <div className="text-sm font-medium leading-tight">{n.label}</div>
-                  <div
-                    className={`mt-0.5 text-[11px] leading-snug ${
-                      active ? "text-slate-300" : "text-slate-400"
-                    }`}
-                  >
-                    {n.desc}
-                  </div>
                 </button>
               );
             })}
