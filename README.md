@@ -181,6 +181,11 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 **作用**：给「使用方」发的调用凭证。网关鉴权只看 VK，不直接暴露 Provider key。
 
 - **新建**：填名称、归属账号、每日 Token 限额（硬限额，按本地时区自然日重置；测试期可设大，避免在上游 1M 额度之前就被网关 429 拦住）。
+- **归属账号（owner_account_id）**：即 `accounts` 表的主键 UUID，用来做 RBAC 隔离（普通用户只能看到自己归属的 Key）。**该字段必填**。当前控制台界面不直接下拉选账号，需要你提供账号的 UUID：
+  - 最简单：去 **账号** 页，每条账号下方现在都会显示其 `id` 并带一个 **「复制 id」** 按钮，一键复制后粘到 Keys 页的 `owner_account_id` 输入框即可。
+  - 或查库：`python3 -c "import sqlite3; c=sqlite3.connect('data/gateway.db'); print(c.execute('SELECT id, username FROM accounts').fetchall())"`
+  - 或调 API（需管理员 JWT）：`GET /api/accounts` 返回的每条都含 `"id"`。
+  - ⚠️ 注意：账号 id 是随机 UUID，**清库重建后 admin 的 id 会变**，旧 id 失效。
 - **明文仅显示一次**：创建后完整 VK 明文只弹窗展示一次，**务必立即复制保存**；之后数据库只存其 SHA-256 哈希。
 - **管理**：支持重置（重新生成明文）、删除。普通用户只能看到 / 操作自己归属账号下的 Key（后端按 `owner_account_id` 强制过滤）。
 
@@ -195,6 +200,7 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 **作用**：管理后台登录账号与角色，实施 RBAC。
 
 - 新建 / 启用停用 / 删除账号，分配角色 `admin` 或 `user`。
+- **每条账号显示其 id 与「复制 id」按钮**：建虚拟 Key 时需要的 `owner_account_id` 就是这里复制的 UUID（见第 4 节）。
 - **无公开注册页**：首个管理员由 `BOOTSTRAP_ADMIN_PASSWORD` 在空库时创建，之后全靠管理员在后台增删。
 - 权限边界：user 仅能看自己的 Key 与用量；admin 能看到全部。前端菜单隐藏只是 UX，后端过滤才是安全边界。
 

@@ -19,6 +19,17 @@ export function Accounts({ onError }: Props) {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("user");
   const [busy, setBusy] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyId = async (id: string) => {
+    try {
+      await navigator.clipboard.writeText(id);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500);
+    } catch {
+      onError("复制失败，请手动选择复制");
+    }
+  };
 
   const load = async () => {
     try {
@@ -92,8 +103,17 @@ export function Accounts({ onError }: Props) {
             <div>
               <div className="text-sm font-medium text-slate-800">{a.username}</div>
               <div className="text-xs text-slate-500">角色：{a.role} · 状态：{a.status}</div>
+              <div className="mt-1 flex items-center gap-2">
+                <code className="text-xs text-slate-400 break-all">{a.id}</code>
+                <button
+                  onClick={() => copyId(a.id)}
+                  className="text-xs px-2 py-0.5 border rounded text-slate-500 hover:bg-slate-50 shrink-0"
+                >
+                  {copiedId === a.id ? "已复制" : "复制 id"}
+                </button>
+              </div>
             </div>
-            <button onClick={() => toggle(a)} className="text-xs px-2 py-1 border rounded hover:bg-slate-50">
+            <button onClick={() => toggle(a)} className="text-xs px-2 py-1 border rounded hover:bg-slate-50 shrink-0">
               {a.status === "active" ? "禁用" : "启用"}
             </button>
           </div>
