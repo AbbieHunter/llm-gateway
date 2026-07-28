@@ -28,7 +28,12 @@ services:
       - default
 
   gateway:
-    build: .
+    build:
+      context: .
+      # 国内服务器构建提速：pip/npm 走阿里云/npmmirror 镜像。
+      args:
+        PIP_INDEX: https://mirrors.aliyun.com/pypi/simple/
+        NPM_REGISTRY: https://registry.npmmirror.com
     # 不发布宿主机端口：Caddy 通过 gateway:8000 内网访问
     env_file:
       - .env

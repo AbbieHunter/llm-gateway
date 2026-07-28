@@ -7,15 +7,20 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
+# 构建参数：包索引镜像源。默认官方源（本地构建不变）；
+# 生产部署(国内服务器)由 compose 注入阿里云/npmmirror 提速。
+ARG PIP_INDEX=https://pypi.org/simple/
+ARG NPM_REGISTRY=https://registry.npmjs.org/
+
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -i ${PIP_INDEX}
 
 # --- Frontend build (runs inside the image — `docker compose up -d --build` is one step) ---
 # 1) Dependency layer: the slow one (apt + npm install). Depends ONLY on
 #    package.json, so it is cached unless frontend deps actually change.
 COPY frontend/package*.json ./frontend/
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
-    && cd /app/frontend && npm install \
+    && cd /app/frontend && npm install --registry ${NPM_REGISTRY} \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 # 2) Source + build. vite.config.ts already writes output to /app/app/static/dist
 #    (the dir FastAPI serves), so no extra `cp` is needed — that was the build break.
