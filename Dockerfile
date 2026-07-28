@@ -1,5 +1,10 @@
 FROM python:3.12-slim
 
+# Avoid interactive debconf prompts during apt installs. Set via ENV (not a RUN
+# prefix) so it persists into dpkg postinst sub-scripts and fully silences the
+# harmless "unable to initialize frontend" warnings on Debian trixie.
+ENV DEBIAN_FRONTEND=noninteractive
+
 WORKDIR /app
 
 COPY requirements.txt .
@@ -10,9 +15,8 @@ COPY scripts ./scripts
 
 # --- Frontend build (runs inside the image — `docker compose up -d --build` is now one step) ---
 # 1) Dependency layer: only re-runs `npm install` when package.json changes.
-#    DEBIAN_FRONTEND=noninteractive silences the harmless debconf frontend warnings.
 COPY frontend/package*.json ./frontend/
-RUN DEBIAN_FRONTEND=noninteractive apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
     && cd /app/frontend && npm install \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 # 2) Source + build. vite.config.ts already writes output to /app/app/static/dist
