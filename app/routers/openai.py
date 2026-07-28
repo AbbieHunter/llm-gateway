@@ -230,6 +230,7 @@ async def _nonstream_response(
                 await log_usage(
                     vk_id=vk.vk_id,
                     account_id=vk.account_id,
+                    route_alias=req.model,
                     model=model_used,
                     prompt_tokens=usage["prompt_tokens"],
                     completion_tokens=usage["completion_tokens"],
