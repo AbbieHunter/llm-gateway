@@ -148,6 +148,14 @@ export function Usage({ isAdmin, onError }: Props) {
             ))}
           </select>
           <button
+            onClick={load}
+            disabled={busy || exporting}
+            className="px-3 py-1 text-sm border rounded text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+            title="重新拉取当前视图与时间范围的用量数据"
+          >
+            {busy ? "刷新中…" : "刷新"}
+          </button>
+          <button
             onClick={exportCsv}
             disabled={exporting || busy}
             className="px-3 py-1 text-sm border rounded text-slate-600 hover:bg-slate-100 disabled:opacity-50"
