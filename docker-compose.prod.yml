@@ -35,6 +35,8 @@ services:
         PIP_INDEX: https://mirrors.aliyun.com/pypi/simple/
         NPM_REGISTRY: https://registry.npmmirror.com
         APT_MIRROR: mirrors.aliyun.com
+        # 前端 API 前缀：生产走 Caddy /gw 路径代理，须与 Caddyfile 的 handle /gw/* 一致。
+        VITE_API_BASE: "/gw"
     # 不发布宿主机端口：Caddy 通过 gateway:8000 内网访问
     env_file:
       - .env

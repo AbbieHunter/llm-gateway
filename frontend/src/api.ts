@@ -1,9 +1,10 @@
 // Thin fetch wrapper for the console API (/api/*). Credentials are sent as
 // httpOnly cookies (see ARCHITECTURE §4.3/§4.9) — never put tokens in JS.
 
-// 部署在反向代理子路径下时改为 "/gw"（与 Caddy 的 /gw 路径代理一致）。
-// 本地直连网关(开发)时留空。
-const BASE = "/gw";
+// API 前缀：本地直连网关(开发)时为空(根路径)；部署在反向代理子路径下时
+// 由其注入，例如 "/gw"（与 Caddy 的 /gw 路径代理一致）。
+// 通过构建期环境变量 VITE_API_BASE 控制，默认 ""（根路径），生产注入 "/gw"。
+const BASE: string = import.meta.env.VITE_API_BASE ?? "";
 
 export class ApiError extends Error {
   status: number;

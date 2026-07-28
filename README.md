@@ -81,6 +81,12 @@
 
 > ⚠️ **改 `.env` 或改代码后，用 `docker compose up -d --build` 重建**（`restart` 不会重载环境变量、也不会重新构建前端）。
 
+### 前端 API 前缀（`VITE_API_BASE`）
+控制台的 API 请求前缀由构建期环境变量 `VITE_API_BASE` 决定，默认**空字符串（根路径）**，适配「直连网关」：
+- **本地 / 直连网关**（如 `http://localhost:8000`）：什么都不用设，`BASE=""`，接口走 `/api/*`，开箱即用。
+- **反向代理子路径**（如用 Caddy 把 `https://域名/gw` 代理到网关）：构建时需注入 `VITE_API_BASE=/gw`，接口才会走 `/gw/api/*`，与 Caddy 的 `handle /gw/* { uri strip_prefix /gw; reverse_proxy gateway:8000 }` 对齐。`docker-compose.prod.yml` 已默认注入 `/gw`；若你自托管走子路径，在 gateway 构建 `args` 里加 `VITE_API_BASE: "/gw"` 再 `--build` 即可。
+- ⚠️ 不匹配会表现为：浏览器控制台一堆 `404 / 405`（如 `/gw/api/auth/login` 找不到），因为前缀与实际访问路径对不上。
+
 ### 数据持久化（重要，别踩坑）
 
 网关的**所有控制台业务数据**——账号、虚拟 Key、路由别名（alias）、Provider 前缀、用量记录——都存储在容器内的 SQLite 数据库 `./data/gateway.db`（`WORKDIR=/app`，即 `/app/data/gateway.db`）。
@@ -370,6 +376,9 @@ A. 前端在构建镜像时由 `Dockerfile` 自动打包进 `app/static/dist`，
 
 **Q8. 我用某个虚拟 Key 调了一次网关，但在用量报表里看不到这条记录？**
 A. 两个常见原因：① **查看范围**：用量报表默认只显示**当前登录账号**自己的用量。如果这次调用用的是**别的账号**的 VK（比如用 Bob 的 VK 调，却用 admin 登录看），admin 视角默认看不到——请勾选右上角「**全局视角**」即可看到所有账号的记录。② **页面不自动刷新**：报表页不会自动轮询，切换标签页 / 时间范围 / 勾选全局视角会重新查询；若一直停在原页面，刷新浏览器（Cmd+R）即可。提示：明细视图里能看到每次调用的「别名」与「实际模型」，可据此核对。
+
+**Q9. 浏览器控制台一堆 `404` / `405`（如 `/gw/api/auth/login` 找不到），但网关明明在跑？**
+A. 这是**前端 API 前缀（`BASE`）与实际访问路径对不上**。源码里 `BASE` 来自构建期变量 `VITE_API_BASE`（见上文「前端 API 前缀」）：默认 `""`（根路径，适配 `localhost:8000` 直连）；若镜像是用 `VITE_API_BASE=/gw` 构建的（生产走 Caddy 子路径），就必须通过 `https://域名/gw` 访问，由 Caddy 把 `/gw` 前缀剥掉再转发给网关。若你**本地直连 `:8000` 却用了 `/gw` 版镜像**（或反之），所有 `/gw/api/*` 请求都会打到裸网关上、无对应路由 → 404/405。修复：按你的访问方式用匹配的 `VITE_API_BASE` 重新 `docker compose up -d --build`（本地留空、子路径代理用 `/gw`）即可。
 
 ---
 

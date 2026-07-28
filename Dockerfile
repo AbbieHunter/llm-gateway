@@ -13,6 +13,9 @@ ARG PIP_INDEX=https://pypi.org/simple/
 ARG NPM_REGISTRY=https://registry.npmjs.org/
 # apt 源(装 nodejs/npm 用)。默认官方 deb.debian.org；生产换阿里云 Debian 镜像。
 ARG APT_MIRROR=deb.debian.org
+# 前端 API 前缀：本地直连网关时空 ""（根路径）；生产路径代理注入 "/gw"。
+# 通过 ENV 透传给 npm run build（Vite 在构建期内联 import.meta.env.VITE_API_BASE）。
+ARG VITE_API_BASE=""
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -i ${PIP_INDEX}
@@ -30,7 +33,7 @@ RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/*.sources 
 COPY frontend ./frontend
 # vite.config.ts outDir is ../app/static/dist — ensure /app/app exists so the
 # build can write there before the backend source is copied in.
-RUN mkdir -p /app/app && cd /app/frontend && npm run build
+RUN mkdir -p /app/app && cd /app/frontend && VITE_API_BASE=${VITE_API_BASE} npm run build
 
 # Backend source is placed LAST on purpose: it changes most often, and we do NOT
 # want an edit to app/*.py to invalidate (and re-run) the slow frontend layers
