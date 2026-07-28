@@ -18,7 +18,8 @@ ARG APT_MIRROR=deb.debian.org
 ARG VITE_API_BASE=""
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt -i ${PIP_INDEX}
+# 慢网/国内构建易超时：显式放大 socket 读超时并加重试，避免 litellm 等大包下载中断。
+RUN pip install --no-cache-dir --timeout 120 --retries 10 -r requirements.txt -i ${PIP_INDEX}
 
 # --- Frontend build (runs inside the image — `docker compose up -d --build` is one step) ---
 # 1) Dependency layer: the slow one (apt + npm install). Depends ONLY on
@@ -26,7 +27,7 @@ RUN pip install --no-cache-dir -r requirements.txt -i ${PIP_INDEX}
 COPY frontend/package*.json ./frontend/
 RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null; \
     apt-get update && apt-get install -y --no-install-recommends nodejs npm \
-    && cd /app/frontend && npm install --registry ${NPM_REGISTRY} \
+    && cd /app/frontend && npm install --registry ${NPM_REGISTRY} --fetch-timeout 600000 --fetch-retries 5 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 # 2) Source + build. vite.config.ts already writes output to /app/app/static/dist
 #    (the dir FastAPI serves), so no extra `cp` is needed — that was the build break.

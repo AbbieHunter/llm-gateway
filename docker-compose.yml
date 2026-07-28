@@ -45,7 +45,15 @@ services:
     restart: "no"
 
   gateway:
-    build: .
+    build:
+      context: .
+      # 本地构建默认走国内镜像(用户环境在国内)；非国内或想自定义时可用
+      # 环境变量覆盖：PIP_INDEX=https://pypi.org/simple/ NPM_REGISTRY=https://registry.npmjs.org/ APT_MIRROR=deb.debian.org
+      args:
+        PIP_INDEX: ${PIP_INDEX:-https://mirrors.aliyun.com/pypi/simple/}
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmmirror.com}
+        APT_MIRROR: ${APT_MIRROR:-mirrors.aliyun.com}
+        VITE_API_BASE: ${VITE_API_BASE:-}
     ports:
       - "8000:8000"
     env_file:
