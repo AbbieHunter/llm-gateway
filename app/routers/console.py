@@ -571,15 +571,17 @@ async def usage(
         group_by = "key"
 
     # Derive the date window from `range` unless an explicit from_date is given.
+    # Use the UTC date so the window aligns with created_at (stored as naive UTC).
+    _today = datetime.datetime.now(datetime.timezone.utc).date()
     if from_date is None and range in ("day", "week", "month"):
         days = {"day": 1, "week": 7, "month": 30}[range]
-        from_date = (datetime.date.today() - datetime.timedelta(days=days - 1)).isoformat()
+        from_date = (_today - datetime.timedelta(days=days - 1)).isoformat()
 
     # Enforce max export window (R6): 90 days.
     if from_date:
         try:
             fd = datetime.date.fromisoformat(from_date)
-            td = datetime.date.today() if to_date is None else datetime.date.fromisoformat(to_date)
+            td = _today if to_date is None else datetime.date.fromisoformat(to_date)
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="invalid date (expected YYYY-MM-DD)"
@@ -597,10 +599,18 @@ async def usage(
         q = q.where(UsageLog.vk_id == vk_id)
     else:
         q = q.where(UsageLog.account_id == account.id)  # self (owner filter)
+    # Compare as naive UTC-midnight datetimes (matching the stored space-separated
+    # format). Upper bound is the exclusive next-day midnight so a whole `to_date`
+    # day is included — a date-only `<= to_date` previously dropped that day's rows.
     if from_date:
-        q = q.where(UsageLog.created_at >= from_date)
+        from_dt = datetime.datetime(fd.year, fd.month, fd.day, tzinfo=None)
+        q = q.where(UsageLog.created_at >= from_dt)
     if to_date:
-        q = q.where(UsageLog.created_at <= to_date)
+        to_dt = (
+            datetime.datetime(td.year, td.month, td.day, tzinfo=None)
+            + datetime.timedelta(days=1)
+        )
+        q = q.where(UsageLog.created_at < to_dt)
     q = q.order_by(UsageLog.created_at.desc())
     rows = (await db.execute(q)).scalars().all()
 
@@ -779,10 +789,13 @@ async def dashboard_overview(
       (share of today's calls with status != success).
     - anomalies: providers flagged quota_exhausted / degraded / down (from Redis).
     """
+    # created_at is persisted as naive UTC (see models._now); build the same
+    # space-separated midnight datetime so SQLite string comparison matches.
+    # Passing a Python datetime (not an isoformat "T"-separated string) avoids the
+    # prior bug where every row sorted before the threshold and the overview returned 0.
     today_start = (
-        datetime.datetime.now()
-        .replace(hour=0, minute=0, second=0, microsecond=0)
-        .isoformat()
+        datetime.datetime.now(datetime.timezone.utc)
+        .replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
     )
     rows = (
         await db.execute(select(UsageLog).where(UsageLog.created_at >= today_start))
