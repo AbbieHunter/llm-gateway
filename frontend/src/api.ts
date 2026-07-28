@@ -70,4 +70,31 @@ export const api = {
     const qs = new URLSearchParams(params).toString();
     return req(`/api/usage${qs ? `?${qs}` : ""}`);
   },
+  usageCsv: async (params: Record<string, string> = {}) => {
+    const qs = new URLSearchParams({ ...params, format: "csv" }).toString();
+    const res = await fetch(`/api/usage?${qs}`, {
+      credentials: "include",
+      headers: { Accept: "text/csv" },
+    });
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const j = await res.json();
+        detail = j.detail || detail;
+      } catch {
+        /* ignore non-JSON error bodies */
+      }
+      throw new ApiError(res.status, detail);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const stamp = new Date().toISOString().slice(0, 10);
+    a.download = `usage_${params.group_by || "detail"}_${stamp}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
 };

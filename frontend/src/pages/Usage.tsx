@@ -38,6 +38,7 @@ export function Usage({ isAdmin, onError }: Props) {
   const [rows, setRows] = useState<UsageRow[]>([]);
   const [global, setGlobal] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   // Default to 明细 so a non-admin (and an admin not yet in global view) lands
   // straight on the per-call log; an admin who ticks 全局视角 switches to the
   // per-account summary via the effect below.
@@ -80,6 +81,22 @@ export function Usage({ isAdmin, onError }: Props) {
   }, [groupBy, range, global]);
 
   const isDetail = groupBy === "detail";
+
+  const exportCsv = async () => {
+    setExporting(true);
+    onError(null);
+    try {
+      const params: Record<string, string> = { range };
+      if (isAdmin && global) params.scope = "global";
+      if (isDetail) params.view = "detail";
+      else params.group_by = groupBy;
+      await api.usageCsv(params);
+    } catch (e: any) {
+      onError(e?.message || "导出失败");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const labelOf = (r: UsageRow) =>
     groupBy === "account"
@@ -130,6 +147,14 @@ export function Usage({ isAdmin, onError }: Props) {
               </option>
             ))}
           </select>
+          <button
+            onClick={exportCsv}
+            disabled={exporting || busy}
+            className="px-3 py-1 text-sm border rounded text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+            title="按当前视图与时间范围导出 CSV（90 天窗口、10 万行上限）"
+          >
+            {exporting ? "导出中…" : "导出 CSV"}
+          </button>
           {isAdmin && (
             <label className="flex items-center gap-2 text-sm text-slate-600">
               <input type="checkbox" checked={global} onChange={(e) => setGlobal(e.target.checked)} />

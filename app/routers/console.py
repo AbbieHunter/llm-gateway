@@ -485,6 +485,36 @@ def _usage_rows_to_csv(rows: list[dict], group_by: str) -> str:
     return buf.getvalue()
 
 
+def _usage_detail_to_csv(rows: list[dict]) -> str:
+    """Per-call detail CSV (view=detail). Same formula-injection guard as the
+    aggregated helper — cells starting with = + - @ are neutralised (R6)."""
+    import csv
+    import io
+
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "created_at", "route_alias", "model", "provider",
+        "prompt_tokens", "completion_tokens", "total_tokens", "status",
+        "vk_id", "account_id", "username",
+    ])
+    for r in rows:
+        w.writerow([
+            _csv_cell(r.get("created_at")),
+            _csv_cell(r.get("route_alias")),
+            _csv_cell(r.get("model")),
+            _csv_cell(r.get("provider")),
+            r.get("prompt_tokens", 0),
+            r.get("completion_tokens", 0),
+            r.get("total_tokens", 0),
+            _csv_cell(r.get("status")),
+            _csv_cell(r.get("vk_id")),
+            _csv_cell(r.get("account_id")),
+            _csv_cell(r.get("username")),
+        ])
+    return buf.getvalue()
+
+
 @router.get("/usage")
 async def usage(
     scope: str = "self",
@@ -600,6 +630,12 @@ async def usage(
                         else None
                     ),
                 }
+            )
+        if format == "csv":
+            return Response(
+                content=_usage_detail_to_csv(detail_rows),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=usage_detail.csv"},
             )
         return {"group_by": "detail", "rows": detail_rows}
 
