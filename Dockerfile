@@ -11,6 +11,8 @@ WORKDIR /app
 # 生产部署(国内服务器)由 compose 注入阿里云/npmmirror 提速。
 ARG PIP_INDEX=https://pypi.org/simple/
 ARG NPM_REGISTRY=https://registry.npmjs.org/
+# apt 源(装 nodejs/npm 用)。默认官方 deb.debian.org；生产换阿里云 Debian 镜像。
+ARG APT_MIRROR=deb.debian.org
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt -i ${PIP_INDEX}
@@ -19,7 +21,8 @@ RUN pip install --no-cache-dir -r requirements.txt -i ${PIP_INDEX}
 # 1) Dependency layer: the slow one (apt + npm install). Depends ONLY on
 #    package.json, so it is cached unless frontend deps actually change.
 COPY frontend/package*.json ./frontend/
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
+RUN sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null; \
+    apt-get update && apt-get install -y --no-install-recommends nodejs npm \
     && cd /app/frontend && npm install --registry ${NPM_REGISTRY} \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
 # 2) Source + build. vite.config.ts already writes output to /app/app/static/dist
