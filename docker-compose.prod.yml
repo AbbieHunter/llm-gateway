@@ -1,0 +1,102 @@
+# ============================================================================
+# 生产部署 compose（云服务器：111.229.141.149 / ubuntu）
+# ----------------------------------------------------------------------------
+# 设计要点：
+#  * 网关/redis/embedding 三个服务【不发布任何宿主机端口】，避免与同机运行的
+#    card-rules-assistant 栈（已占 80/443/3000/22）冲突。
+#  * 通过加入现有 Caddy 网络 card-rules-assistant_default，由 Caddy 按子域名
+#    llmgateway.asdfghjkl.site 反向代理到 gateway:8000（同网络内网 DNS 可达）。
+#  * 启动：在仓库目录执行
+#        docker compose -f docker-compose.prod.yml up -d --build
+#  * 仅靠本文件即可独立部署（redis/embedding 自带，无需再起一套）。
+# ============================================================================
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # 不发布宿主机端口：仅容器网络内 gateway 可访问
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis-data:/data
+    networks:
+      - default
+
+  # M4 语义缓存 embedding 后端（Ollama 提供 OpenAI 兼容 /v1/embeddings）
+  embedding:
+    image: ollama/ollama
+    restart: unless-stopped
+    # 不发布宿主机端口：仅容器网络内 gateway 可访问
+    volumes:
+      - ollama-data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - default
+
+  embedding-pull:
+    image: ollama/ollama
+    depends_on:
+      embedding:
+        condition: service_started
+    environment:
+      - OLLAMA_HOST=http://embedding:11434
+    entrypoint:
+      - "sh"
+      - "-c"
+      - "until ollama list >/dev/null 2>&1; do sleep 2; done; ollama pull quentinz/bge-small-zh-v1.5; echo PULL_DONE"
+    restart: "no"
+    networks:
+      - default
+
+  gateway:
+    build: .
+    # 不发布宿主机端口：Caddy 通过 gateway:8000 内网访问
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
+      embedding-pull:
+        condition: service_completed_successfully
+    # 生产接线：真实 Redis + 真实 bge embedding。覆盖 .env 中可能残留的开关。
+    environment:
+      - REDIS_FAKE=0
+      - MOCK_PROVIDER=0
+      - REDIS_URL=redis://redis:6379
+      - SEMANTIC_CACHE_ENABLE=1
+      - SEMANTIC_EMBEDDING_MODEL=quentinz/bge-small-zh-v1.5
+      - SEMANTIC_EMBEDDING_API_BASE=http://embedding:11434/v1
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    # 持久化 SQLite 元数据（账号/虚拟Key/路由别名/用量/provider）。
+    volumes:
+      - ./data:/app/data
+    networks:
+      - default
+
+volumes:
+  redis-data:
+  ollama-data:
+
+# 复用 card-rules 的 Caddy 网络，使 gateway 与 card-rules-caddy 互通。
+networks:
+  default:
+    external:
+      name: card-rules-assistant_default
