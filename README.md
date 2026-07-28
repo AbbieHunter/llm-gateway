@@ -69,7 +69,7 @@
    ```bash
    docker compose up -d --build
    ```
-   > 后续更新代码后部署也用这条命令即可。Docker 按层缓存：只有改了 `frontend/` 源码或 `package.json` 时才会重新 `npm install` + `npm run build`；纯后端改动直接复用缓存、秒过。
+   > 后续更新代码后部署也用这条命令即可。Docker 按层缓存：**首次构建**或改了 `frontend/package.json` 时才会联网执行较慢的 `apt-get 装 node` + `npm install`；改了前端源码只重跑 `npm run build`（约 18s）；**纯后端改动**（`app/*.py`）因为 `COPY app` 被刻意放在前端构建层之后，直接复用前端缓存、秒过。
 
 3. 检查健康：
    ```bash
@@ -142,7 +142,7 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 | 路由别名 | 仅管理员 | 把多个候选模型绑成一个别名（如 free），对外用别名调用。支持 failover（按序故障转移）与 weighted（按权重）策略。 |
 | 账号 | 仅管理员 | 管理后台账号与角色（admin / user）。普通用户仅能查看自己的 Key 与用量，后端 RBAC 为唯一权限真相源。 |
 
-> 权限区分：普通用户（user）菜单只显示「概览 / 虚拟 Key / 用量报表」；「Provider / 路由别名 / 账号」仅管理员可见。后端 RBAC 是权限的唯一真相源，前端隐藏菜单只是 UX 层、不是安全边界。
+> 权限区分：普通用户（user）菜单**只显示「用量报表」**；「概览 / 虚拟 Key / Provider / 路由别名 / 账号」仅管理员可见。后端 RBAC 是权限的唯一真相源，前端隐藏菜单只是 UX 层、不是安全边界。
 
 ---
 

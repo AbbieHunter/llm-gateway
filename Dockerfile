@@ -10,11 +10,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app ./app
-COPY scripts ./scripts
-
-# --- Frontend build (runs inside the image — `docker compose up -d --build` is now one step) ---
-# 1) Dependency layer: only re-runs `npm install` when package.json changes.
+# --- Frontend build (runs inside the image — `docker compose up -d --build` is one step) ---
+# 1) Dependency layer: the slow one (apt + npm install). Depends ONLY on
+#    package.json, so it is cached unless frontend deps actually change.
 COPY frontend/package*.json ./frontend/
 RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
     && cd /app/frontend && npm install \
@@ -22,7 +20,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
 # 2) Source + build. vite.config.ts already writes output to /app/app/static/dist
 #    (the dir FastAPI serves), so no extra `cp` is needed — that was the build break.
 COPY frontend ./frontend
-RUN cd /app/frontend && npm run build
+# vite.config.ts outDir is ../app/static/dist — ensure /app/app exists so the
+# build can write there before the backend source is copied in.
+RUN mkdir -p /app/app && cd /app/frontend && npm run build
+
+# Backend source is placed LAST on purpose: it changes most often, and we do NOT
+# want an edit to app/*.py to invalidate (and re-run) the slow frontend layers
+# above. With this order a backend-only change rebuilds only these two COPYs.
+COPY app ./app
+COPY scripts ./scripts
 
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
