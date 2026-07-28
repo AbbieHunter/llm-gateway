@@ -648,10 +648,8 @@ async def usage(
 
     # Attach usernames for the per-account aggregation.
     if group_by == "account":
-        accts = {
-            a.id: a.username
-            for a in (await db.execute(select(Account.id, Account.username))).scalars().all()
-        }
+        acct_rows = (await db.execute(select(Account.id, Account.username))).all()
+        accts = {a[0]: a[1] for a in acct_rows}
         for k, a in agg.items():
             a["username"] = accts.get(k, k if k != "unknown" else "未知账号")
 

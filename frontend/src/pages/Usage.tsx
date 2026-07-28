@@ -65,6 +65,10 @@ export function Usage({ isAdmin, onError }: Props) {
       setRows(data.rows || []);
     } catch (e: any) {
       onError(e?.message);
+      // Roll back to the safe detail view so a failed aggregate query
+      // (e.g. a backend 500) doesn't leave us rendering stale rows with the
+      // wrong shape (missing cost_usd → toFixed crash).
+      setGroupBy("detail");
     } finally {
       setBusy(false);
     }
@@ -223,7 +227,7 @@ export function Usage({ isAdmin, onError }: Props) {
                   <td className="px-3 py-2 text-right text-slate-700">{r.calls}</td>
                   <td className="px-3 py-2 text-right text-slate-700">{r.total_tokens.toLocaleString()}</td>
                   <td className="px-3 py-2 text-right">
-                    <span className="text-slate-700">${r.cost_usd.toFixed(4)}</span>
+                    <span className="text-slate-700">${(r.cost_usd ?? 0).toFixed(4)}</span>
                     {r.cost_is_estimated && (
                       <span className="ml-1 text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded px-1">
                         估算
