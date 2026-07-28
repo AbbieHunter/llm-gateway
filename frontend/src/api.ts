@@ -1,7 +1,9 @@
 // Thin fetch wrapper for the console API (/api/*). Credentials are sent as
 // httpOnly cookies (see ARCHITECTURE §4.3/§4.9) — never put tokens in JS.
 
-const BASE = "";
+// 部署在反向代理子路径下时改为 "/gw"（与 Caddy 的 /gw 路径代理一致）。
+// 本地直连网关(开发)时留空。
+const BASE = "/gw";
 
 export class ApiError extends Error {
   status: number;
@@ -72,7 +74,7 @@ export const api = {
   },
   usageCsv: async (params: Record<string, string> = {}) => {
     const qs = new URLSearchParams({ ...params, format: "csv" }).toString();
-    const res = await fetch(`/api/usage?${qs}`, {
+    const res = await fetch(`${BASE}/usage?${qs}`, {
       credentials: "include",
       headers: { Accept: "text/csv" },
     });
