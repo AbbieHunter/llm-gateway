@@ -43,14 +43,9 @@ export function App() {
     setView("dashboard");
   };
 
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center text-slate-400">加载中…</div>;
-  }
-  if (!user) {
-    return <Login onLogin={doLogin} error={error} setError={setError} />;
-  }
-
-  const isAdmin = user.role === "admin";
+  // --- Derived UI config (plain values, NOT hooks) — must be computed before
+  //     the early returns below so the hooks above always run unconditionally. ---
+  const isAdmin = user?.role === "admin";
   const nav: { key: View; label: string; adminOnly: boolean; desc: string }[] = [
     {
       key: "dashboard",
@@ -95,11 +90,21 @@ export function App() {
   const visibleKeys = new Set(visibleNav.map((n) => n.key));
 
   // Clamp the active view to something this role may see (e.g. a freshly
-  // logged-in non-admin should land on 用量报表, not 概览).
+  // logged-in non-admin should land on 用量报表, not 概览). This useEffect is
+  // declared BEFORE the early returns so it always registers as a hook —
+  // placing it after an early return caused React #310 ("rendered more hooks
+  // than the previous render") because it only ran once a user existed.
   useEffect(() => {
     if (user && !visibleKeys.has(view)) setView("usage");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center text-slate-400">加载中…</div>;
+  }
+  if (!user) {
+    return <Login onLogin={doLogin} error={error} setError={setError} />;
+  }
 
   return (
     <div className="min-h-screen flex bg-slate-50">
