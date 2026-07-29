@@ -17,6 +17,7 @@ export function Routes({ onError }: Props) {
   const [providers, setProviders] = useState("");
   const [strategy, setStrategy] = useState("failover");
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<Route | null>(null);
 
   const load = async () => {
     try {
@@ -31,10 +32,32 @@ export function Routes({ onError }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const create = async (e: React.FormEvent) => {
+  const startEdit = (r: Route) => {
+    setEditing(r);
+    setAlias(r.alias);
+    setProviders(r.providers.join("\n"));
+    setStrategy(r.strategy);
+    onError(null);
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setAlias("");
+    setProviders("");
+    setStrategy("failover");
+    onError(null);
+  };
+
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBusy(true);
     onError(null);
+    const name = alias.trim();
+    if (!name) {
+      onError("请填写别名");
+      setBusy(false);
+      return;
+    }
     const provs = providers
       .split(/[,\n]/)
       .map((s) => s.trim())
@@ -45,10 +68,16 @@ export function Routes({ onError }: Props) {
       return;
     }
     try {
-      await api.createRoute({ alias, providers: provs, strategy });
-      setAlias("");
-      setProviders("");
-      setStrategy("failover");
+      if (editing) {
+        await api.patchRoute(editing.alias, {
+          alias: name,
+          providers: provs,
+          strategy,
+        });
+      } else {
+        await api.createRoute({ alias: name, providers: provs, strategy });
+      }
+      cancelEdit();
       await load();
     } catch (e: any) {
       onError(e?.message);
@@ -62,6 +91,7 @@ export function Routes({ onError }: Props) {
     onError(null);
     try {
       await api.deleteRoute(r.alias);
+      if (editing && editing.alias === r.alias) cancelEdit();
       await load();
     } catch (e: any) {
       onError(e?.message);
@@ -75,7 +105,12 @@ export function Routes({ onError }: Props) {
         别名 → 有序候选模型串（LiteLLM 格式，如 <code>openai/gpt-4o-mini</code>）。调用时传 <code>model=别名</code> 即按策略路由。
       </p>
 
-      <form onSubmit={create} className="mt-4 bg-white rounded-lg border p-4 space-y-3">
+      <form onSubmit={submit} className="mt-4 bg-white rounded-lg border p-4 space-y-3">
+        {editing && (
+          <div className="text-xs text-slate-500 bg-slate-50 border rounded px-3 py-2">
+            编辑模式：正在修改别名 <span className="font-medium text-slate-700">{editing.alias}</span>（可同时更改别名名称与候选模型）
+          </div>
+        )}
         <div className="flex gap-3">
           <div className="flex-1">
             <label className="block text-sm text-slate-600 mb-1">别名</label>
@@ -94,9 +129,16 @@ export function Routes({ onError }: Props) {
           <label className="block text-sm text-slate-600 mb-1">候选模型（逗号或换行分隔）</label>
           <textarea value={providers} onChange={(e) => setProviders(e.target.value)} rows={3} className="w-full border rounded px-3 py-2 text-sm font-mono" placeholder={"openai/gpt-4o-mini\ndeepseek/deepseek-chat"} />
         </div>
-        <button type="submit" disabled={busy} className="bg-slate-800 text-white rounded px-4 py-2 text-sm disabled:opacity-50">
-          {busy ? "创建中…" : "创建别名"}
-        </button>
+        <div className="flex gap-2">
+          <button type="submit" disabled={busy} className="bg-slate-800 text-white rounded px-4 py-2 text-sm disabled:opacity-50">
+            {busy ? (editing ? "保存中…" : "创建中…") : editing ? "保存修改" : "创建别名"}
+          </button>
+          {editing && (
+            <button type="button" onClick={cancelEdit} className="border border-slate-300 text-slate-600 rounded px-4 py-2 text-sm hover:bg-slate-50">
+              取消
+            </button>
+          )}
+        </div>
       </form>
 
       <div className="mt-4 bg-white rounded-lg border divide-y">
@@ -108,9 +150,14 @@ export function Routes({ onError }: Props) {
               <div className="text-xs text-slate-500 font-mono">{r.providers.join(" → ")}</div>
               <div className="text-xs text-slate-400">策略：{r.strategy}</div>
             </div>
-            <button onClick={() => remove(r)} className="text-xs px-2 py-1 border border-red-200 text-red-600 rounded hover:bg-red-50">
-              删除
-            </button>
+            <div className="flex gap-2">
+              <button onClick={() => startEdit(r)} className="text-xs px-2 py-1 border border-slate-300 text-slate-600 rounded hover:bg-slate-50">
+                编辑
+              </button>
+              <button onClick={() => remove(r)} className="text-xs px-2 py-1 border border-red-200 text-red-600 rounded hover:bg-red-50">
+                删除
+              </button>
+            </div>
           </div>
         ))}
       </div>

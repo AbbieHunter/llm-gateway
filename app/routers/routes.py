@@ -26,6 +26,7 @@ class RouteCreate(BaseModel):
 
 
 class RoutePatch(BaseModel):
+    alias: str | None = Field(default=None, min_length=1)  # optional rename target
     providers: list[str] | None = Field(default=None, min_length=1)
     strategy: str | None = Field(default=None, pattern="^(failover|weighted|cost)$")
     enabled: bool | None = None  # reserved; M1 keeps routes always active
@@ -76,11 +77,18 @@ async def patch_route(
     r = await db.get(ModelRoute, alias)
     if r is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="alias not found")
+    # `alias` is the primary key; an edit may rename it. Resolve the rename
+    # first and reject collisions with an existing alias.
+    if body.alias is not None and body.alias != alias:
+        if await db.get(ModelRoute, body.alias) is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="alias exists")
+        r.alias = body.alias
     if body.providers is not None:
         r.providers = json.dumps(body.providers)
     if body.strategy is not None:
         r.strategy = body.strategy
     await db.commit()
+    await db.refresh(r)
     return {"alias": r.alias, "providers": json.loads(r.providers), "strategy": r.strategy}
 
 
