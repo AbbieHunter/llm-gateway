@@ -130,6 +130,8 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 | `SEMANTIC_EMBEDDING_MODEL` / `API_BASE` / `API_KEY` | 语义缓存 embedding 后端（默认 Ollama `quentinz/bge-small-zh-v1.5`） | `quentinz/bge-small-zh-v1.5` / 空（走 Ollama） |
 | `METRICS_ENABLED` | Prometheus `/metrics` 开关 | `1` |
 | `GUARDRAILS_ENABLED` | PII 护栏总开关（默认关） | `0` |
+| `ROUTE_CACHE_TTL_SEC` | 路由别名（model_routes）内存缓存 TTL；写路径（增/改/删别名）会立即失效/刷新对应项，TTL 仅作漏失效兜底 | `60` |
+| `PROVIDER_CACHE_TTL_SEC` | Provider 前缀（providers）内存缓存 TTL；Provider 无运行时编辑接口，靠此 TTL 自愈 | `300` |
 
 ---
 

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import Account, ModelRoute
 from app.db.session import get_db
 from app.middleware.session_auth import require_admin
+from app.core.router import drop_route_cache, refresh_route_cache
 
 router = APIRouter(prefix="/api/routes", tags=["routes"])
 
@@ -64,6 +65,7 @@ async def create_route(
     db.add(r)
     await db.commit()
     await db.refresh(r)
+    await refresh_route_cache(r.alias, db)  # write-through: new alias available immediately
     return {"alias": r.alias, "providers": body.providers, "strategy": r.strategy}
 
 
@@ -79,16 +81,23 @@ async def patch_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="alias not found")
     # `alias` is the primary key; an edit may rename it. Resolve the rename
     # first and reject collisions with an existing alias.
+    renamed = False
     if body.alias is not None and body.alias != alias:
         if await db.get(ModelRoute, body.alias) is not None:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="alias exists")
         r.alias = body.alias
+        renamed = True
     if body.providers is not None:
         r.providers = json.dumps(body.providers)
     if body.strategy is not None:
         r.strategy = body.strategy
     await db.commit()
     await db.refresh(r)
+    # write-through: on rename the OLD alias key is now stale -> drop it; the NEW
+    # alias key is refreshed. On in-place edit just refresh the (same) key.
+    if renamed:
+        drop_route_cache(alias)
+    await refresh_route_cache(r.alias, db)
     return {"alias": r.alias, "providers": json.loads(r.providers), "strategy": r.strategy}
 
 
@@ -103,4 +112,5 @@ async def delete_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="alias not found")
     await db.delete(r)
     await db.commit()
+    drop_route_cache(alias)  # write-through: alias no longer resolvable
     return {"ok": True}
