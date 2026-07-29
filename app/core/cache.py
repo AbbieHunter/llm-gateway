@@ -27,6 +27,7 @@ def cache_key(
     temperature: float | None = None,
     top_p: float | None = None,
     seed: int | None = None,
+    enable_thinking: bool | None = None,
 ) -> str:
     """Stable hash of the request's output-determining inputs (R7)."""
     norm = {
@@ -35,6 +36,7 @@ def cache_key(
         "temperature": temperature,
         "top_p": top_p,
         "seed": seed,
+        "enable_thinking": enable_thinking,
     }
     blob = json.dumps(norm, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()

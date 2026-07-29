@@ -69,6 +69,7 @@ class ChatRequest(BaseModel):
     max_tokens: Optional[int] = None
     top_p: Optional[float] = None
     seed: Optional[int] = None  # R7: part of cache key (deterministic prompt)
+    enable_thinking: Optional[bool] = None  # DashScope thinking models
 
 
 # ---------- helpers ----------
@@ -156,7 +157,12 @@ async def _nonstream_response(
 
     for candidate in candidates:
         key = cache_key(
-            candidate, messages, req.temperature, req.top_p, req.seed
+            candidate,
+            messages,
+            req.temperature,
+            req.top_p,
+            req.seed,
+            passthrough.get("enable_thinking"),
         )
 
         # Exact cache hit (R7): zero upstream cost.
@@ -188,7 +194,7 @@ async def _nonstream_response(
             return cached
 
         # Semantic cache (Tier2, M4): only on exact miss, non-stream, seed bypass.
-        sem = await sem_cache_get(candidate, messages, req.seed)
+        sem = await sem_cache_get(candidate, messages, req.seed, passthrough.get("enable_thinking"))
         if sem is not None:
             if outbound_mask_enabled():
                 sem = redact_response_content(sem)
@@ -241,7 +247,10 @@ async def _nonstream_response(
                 await set_status(candidate, "healthy")
                 await record_outcome(candidate, True)
                 await cache_set(key, _response_to_cacheable(resp))
-                await sem_cache_set(candidate, messages, req.seed, _response_to_cacheable(resp))
+                await sem_cache_set(
+                    candidate, messages, req.seed, _response_to_cacheable(resp),
+                    passthrough.get("enable_thinking"),
+                )
                 _record_request_metrics(
                     model_used, "success", latency, usage["prompt_tokens"] + usage["completion_tokens"]
                 )
@@ -481,6 +490,15 @@ def _passthrough(req: ChatRequest) -> dict[str, Any]:
         passthrough["top_p"] = req.top_p
     if req.seed is not None:
         passthrough["seed"] = req.seed
+    if req.enable_thinking is not None:
+        passthrough["enable_thinking"] = req.enable_thinking
+    elif not req.stream:
+        # DashScope requires enable_thinking=false for non-streaming calls to
+        # thinking-capable models (e.g. qwen3-32b). Default it so such models
+        # work through the gateway instead of 400-ing and force-failing over to
+        # the next candidate. Verified harmless for non-thinking models
+        # (qwen-plus/max/turbo accept enable_thinking=false on non-streaming).
+        passthrough["enable_thinking"] = False
     return passthrough
 
 

@@ -90,10 +90,13 @@ async def sem_cache_get(
     model: str,
     messages: list[dict],
     seed: int | None,
+    enable_thinking: bool | None = None,
 ) -> dict | None:
     """Return a cached response if a sufficiently similar prompt was cached.
 
     Bypassed when disabled, or when `seed` is set (deterministic, R1).
+    `enable_thinking` scopes the similarity set so thinking/non-thinking
+    responses are never cross-served (they differ in output-determining input).
     """
     if not SEMANTIC_CACHE_ENABLE or seed is not None:
         return None
@@ -104,7 +107,7 @@ async def sem_cache_get(
     qvec = await _embed(text)
     if qvec is None:
         return None
-    scope_key = f"semcache:{model}"
+    scope_key = f"semcache:{model}:et{enable_thinking}"
     try:
         members = await client.smembers(scope_key)
     except Exception:  # noqa: BLE001
@@ -128,8 +131,12 @@ async def sem_cache_set(
     messages: list[dict],
     seed: int | None,
     response: dict,
+    enable_thinking: bool | None = None,
 ) -> None:
-    """Store `response` keyed by the prompt embedding, scoped to `model`."""
+    """Store `response` keyed by the prompt embedding, scoped to `model`.
+
+    `enable_thinking` scopes the similarity set (see sem_cache_get).
+    """
     if not SEMANTIC_CACHE_ENABLE or seed is not None:
         return
     client = get_redis()
@@ -139,7 +146,7 @@ async def sem_cache_set(
     vec = await _embed(text)
     if vec is None:
         return
-    h = hashlib.sha256(f"{model}|{text}".encode()).hexdigest()
+    h = hashlib.sha256(f"{model}|{text}|et{enable_thinking}".encode()).hexdigest()
     entry_key = f"semcache:entry:{h}"
     try:
         await client.set(
@@ -147,7 +154,7 @@ async def sem_cache_set(
             json.dumps({"embedding": vec, "response": response}),
             ex=SEMANTIC_CACHE_TTL_SEC,
         )
-        await client.sadd(f"semcache:{model}", entry_key)
+        await client.sadd(f"semcache:{model}:et{enable_thinking}", entry_key)
     except Exception:  # noqa: BLE001
         pass
 
