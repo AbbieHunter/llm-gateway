@@ -33,6 +33,32 @@ from app.config import (
 from app.core.redis_client import get_redis
 
 
+def _is_multimodal(messages: list[dict]) -> bool:
+    """True if any message carries non-text content (image/audio/file).
+
+    The semantic cache keys on the *text* prompt only. For multimodal requests
+    the media is the real input, but the embedding model's fixed context window
+    (e.g. bge-small-zh-v1.5 = 512 tokens) truncates a multi-KB base64 image down
+    to its shared header + the identical question text — so *different* images
+    collapse to near-identical embeddings and text-similarity collisions serve
+    one image's response to another (session-pollution bug). Exact cache (Tier-1)
+    is unaffected because it hashes the full message including the media.
+    """
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") in (
+                    "image_url",
+                    "image",
+                    "input_audio",
+                    "audio",
+                    "file",
+                ):
+                    return True
+    return False
+
+
 def _prompt_text(messages: list[dict]) -> str:
     return "\n".join(str(m.get("content", "")) for m in messages)
 
@@ -100,6 +126,10 @@ async def sem_cache_get(
     """
     if not SEMANTIC_CACHE_ENABLE or seed is not None:
         return None
+    # Multimodal input: text-similarity is meaningless and truncation-prone
+    # (see _is_multimodal). Skip the layer so it can never cross-serve images.
+    if _is_multimodal(messages):
+        return None
     client = get_redis()
     if client is None:
         return None
@@ -138,6 +168,9 @@ async def sem_cache_set(
     `enable_thinking` scopes the similarity set (see sem_cache_get).
     """
     if not SEMANTIC_CACHE_ENABLE or seed is not None:
+        return
+    # Multimodal input: never let text-similarity caching cross-serve images.
+    if _is_multimodal(messages):
         return
     client = get_redis()
     if client is None:
