@@ -328,7 +328,7 @@ def test_exact_cache_zero_upstream(client: TestClient, monkeypatch) -> None:
     # Isolate Tier-1 exact cache: disable the M4 semantic cache (Tier-2) so this
     # regression test asserts exact-cache keying only (temperature changes the
     # exact key but NOT the semantic one — Tier-2 is covered by smoke_m4).
-    monkeypatch.setattr("app.core.semantic_cache.SEMANTIC_CACHE_ENABLE", False)
+    monkeypatch.setattr("app.config._cache_cfg", {"exact": True, "semantic": False})
     admin = _admin(client)
     me = client.get("/api/me", cookies={"gw_session": admin}).json()
     rk = client.post(

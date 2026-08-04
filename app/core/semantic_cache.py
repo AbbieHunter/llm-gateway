@@ -21,9 +21,9 @@ import json
 import math
 import re
 
+from app import config
 from app.config import (
     MOCK_PROVIDER,
-    SEMANTIC_CACHE_ENABLE,
     SEMANTIC_CACHE_TTL_SEC,
     SEMANTIC_EMBEDDING_API_BASE,
     SEMANTIC_EMBEDDING_API_KEY,
@@ -124,7 +124,7 @@ async def sem_cache_get(
     `enable_thinking` scopes the similarity set so thinking/non-thinking
     responses are never cross-served (they differ in output-determining input).
     """
-    if not SEMANTIC_CACHE_ENABLE or seed is not None:
+    if not config.is_semantic_cache_enabled() or seed is not None:
         return None
     # Multimodal input: text-similarity is meaningless and truncation-prone
     # (see _is_multimodal). Skip the layer so it can never cross-serve images.
@@ -167,7 +167,7 @@ async def sem_cache_set(
 
     `enable_thinking` scopes the similarity set (see sem_cache_get).
     """
-    if not SEMANTIC_CACHE_ENABLE or seed is not None:
+    if not config.is_semantic_cache_enabled() or seed is not None:
         return
     # Multimodal input: never let text-similarity caching cross-serve images.
     if _is_multimodal(messages):

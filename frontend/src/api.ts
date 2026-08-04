@@ -63,6 +63,10 @@ export const api = {
 
   dashboardOverview: () => req("/api/dashboard/overview"),
 
+  getCacheConfig: () => req("/api/cache-config"),
+  setCacheConfig: (b: { exact: boolean; semantic: boolean }) =>
+    req("/api/cache-config", { method: "PUT", body: JSON.stringify(b) }),
+
   listRoutes: () => req("/api/routes"),
   createRoute: (b: any) => req("/api/routes", { method: "POST", body: JSON.stringify(b) }),
   patchRoute: (alias: string, b: any) =>

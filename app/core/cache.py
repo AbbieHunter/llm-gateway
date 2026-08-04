@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 
+from app import config
 from app.config import CACHE_TTL_SEC
 from app.core.redis_client import get_redis
 
@@ -43,6 +44,8 @@ def cache_key(
 
 
 async def cache_get(key: str) -> dict | None:
+    if not config.is_exact_cache_enabled():
+        return None
     client = get_redis()
     if client is None:
         return None
@@ -58,6 +61,8 @@ async def cache_get(key: str) -> dict | None:
 
 
 async def cache_set(key: str, value: dict, ttl: int = CACHE_TTL_SEC) -> None:
+    if not config.is_exact_cache_enabled():
+        return
     client = get_redis()
     if client is None:
         return

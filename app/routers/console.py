@@ -36,6 +36,7 @@ from app.core.security import (
 )
 from app.db.models import Account, ModelPrice, Provider, UsageLog, VirtualKey
 from app.db.session import get_db
+from app import config
 from app.middleware.session_auth import (
     get_current_account,
     owner_filter,
@@ -328,6 +329,28 @@ async def reset_key(
     # vk.id unchanged => historical usage attribution preserved.
     await db.commit()
     return {**_vk_public(vk), "key": plaintext}
+
+
+# ---------- cache config (admin, web console) ----------
+
+class CacheConfigIn(BaseModel):
+    exact: bool
+    semantic: bool
+
+
+@router.get("/cache-config")
+async def get_cache_config(_: Account = Depends(require_admin)):
+    """Current runtime cache switches (Tier-1 exact + Tier-2 semantic)."""
+    return config.get_cache_config()
+
+
+@router.put("/cache-config")
+async def put_cache_config(
+    body: CacheConfigIn,
+    _: Account = Depends(require_admin),
+):
+    """Persist new cache switches. Effective immediately, no restart needed."""
+    return config.set_cache_config(body.exact, body.semantic)
 
 
 # ---------- providers (T-06) ----------

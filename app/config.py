@@ -1,3 +1,4 @@
+import json
 import os
 
 from dotenv import load_dotenv
@@ -66,6 +67,64 @@ PROBE_COOLDOWN_CAP_SEC = int(os.getenv("PROBE_COOLDOWN_CAP_SEC", "3600"))
 # Exact cache: TTL for cached non-stream responses (seconds, R7).
 CACHE_TTL_SEC = int(os.getenv("CACHE_TTL_SEC", "3600"))
 
+# --- Runtime cache switches (Tier-1 exact + Tier-2 semantic) ---
+# These are runtime-mutable and persisted next to the DB so an admin can toggle
+# caching from the web console without a restart or code change. Startup
+# precedence: env default -> persisted data/cache_config.json override.
+_DB_PATH = DATABASE_URL.replace("sqlite+aiosqlite:///", "").replace("sqlite:///", "")
+DATA_DIR = os.path.dirname(_DB_PATH) or "."
+CACHE_CONFIG_PATH = os.path.join(DATA_DIR, "cache_config.json")
+
+_cache_cfg = {
+    "exact": os.getenv("CACHE_ENABLE", "1") == "1",
+    "semantic": os.getenv("SEMANTIC_CACHE_ENABLE", "1") == "1",
+}
+
+
+def load_cache_config() -> None:
+    """Override in-memory defaults with whatever was persisted (if any)."""
+    global _cache_cfg
+    try:
+        with open(CACHE_CONFIG_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return
+    if isinstance(data, dict):
+        if "exact" in data:
+            _cache_cfg["exact"] = bool(data["exact"])
+        if "semantic" in data:
+            _cache_cfg["semantic"] = bool(data["semantic"])
+
+
+def save_cache_config() -> None:
+    """Persist the current in-memory cache config next to the DB file."""
+    os.makedirs(DATA_DIR, exist_ok=True)
+    with open(CACHE_CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(_cache_cfg, f)
+
+
+def get_cache_config() -> dict:
+    return dict(_cache_cfg)
+
+
+def set_cache_config(exact: bool, semantic: bool) -> dict:
+    _cache_cfg["exact"] = bool(exact)
+    _cache_cfg["semantic"] = bool(semantic)
+    save_cache_config()
+    return dict(_cache_cfg)
+
+
+def is_exact_cache_enabled() -> bool:
+    return _cache_cfg["exact"]
+
+
+def is_semantic_cache_enabled() -> bool:
+    return _cache_cfg["semantic"]
+
+
+# Apply persisted overrides at import time, before the gateway serves traffic.
+load_cache_config()
+
 # --- M4 observability (T-04, R7) ---
 # Master switch for the /metrics endpoint. When False, /metrics returns 404 so
 # the gateway exposes no Prometheus surface at all (defence-in-depth).
@@ -74,8 +133,8 @@ METRICS_ENABLED = os.getenv("METRICS_ENABLED", "1") == "1"
 # --- M4 semantic cache (T-01, R1~R3) ---
 # Tier2 cache: only consulted on an exact-cache miss, non-stream, and when no
 # `seed` is present (deterministic requests must not be soft-reused). Scope is
-# the precise `provider/model` string so answers never cross models.
-SEMANTIC_CACHE_ENABLE = os.getenv("SEMANTIC_CACHE_ENABLE", "1") == "1"
+# the precise `provider/model` string so answers never cross models. The on/off
+# switch itself is now runtime-mutable (see _cache_cfg / is_semantic_cache_enabled).
 SIMILARITY_THRESHOLD = float(os.getenv("SIMILARITY_THRESHOLD", "0.92"))
 # Default embedding model for the semantic (Tier-2) cache. bge-small-zh-v1.5 is a
 # local/open-source Chinese-optimized model; serve it via an OpenAI-compatible

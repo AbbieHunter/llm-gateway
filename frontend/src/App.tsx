@@ -7,6 +7,7 @@ import { Providers } from "./pages/Providers";
 import { Routes } from "./pages/Routes";
 import { Accounts } from "./pages/Accounts";
 import { Usage } from "./pages/Usage";
+import { Settings } from "./pages/Settings";
 
 interface User {
   id: string;
@@ -15,7 +16,7 @@ interface User {
   status: string;
 }
 
-type View = "dashboard" | "keys" | "providers" | "routes" | "accounts" | "usage";
+type View = "dashboard" | "keys" | "providers" | "routes" | "accounts" | "usage" | "settings";
 
 export function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -82,6 +83,12 @@ export function App() {
       label: "账号",
       adminOnly: true,
       desc: "管理后台账号与角色（admin / user）。普通用户仅能查看自己的 Key 与用量，后端 RBAC 为唯一权限真相源。",
+    },
+    {
+      key: "settings",
+      label: "设置",
+      adminOnly: true,
+      desc: "运行时开关：精确缓存（Tier-1）与语义缓存（Tier-2）可即时开启/关闭，并持久化到服务器（重启保留）。",
     },
   ];
 
@@ -156,6 +163,7 @@ export function App() {
         {visibleKeys.has("providers") && view === "providers" && <Providers onError={setError} />}
         {visibleKeys.has("routes") && view === "routes" && <Routes onError={setError} />}
         {visibleKeys.has("accounts") && view === "accounts" && <Accounts onError={setError} />}
+        {visibleKeys.has("settings") && view === "settings" && <Settings onError={setError} />}
       </main>
     </div>
   );

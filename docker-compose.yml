@@ -71,7 +71,6 @@ services:
       - REDIS_FAKE=0
       - MOCK_PROVIDER=0
       - REDIS_URL=redis://redis:6379
-      - SEMANTIC_CACHE_ENABLE=1
       - SEMANTIC_EMBEDDING_MODEL=quentinz/bge-small-zh-v1.5
       - SEMANTIC_EMBEDDING_API_BASE=http://embedding:11434/v1
     healthcheck:
