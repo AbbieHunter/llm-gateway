@@ -19,6 +19,7 @@ from urllib.parse import parse_qsl
 
 from app.config import MOCK_PROVIDER
 from app.core.errors import GatewayError, map_litellm_error
+from app.core.upstreams import prepare_litellm_model
 
 try:
     import litellm
@@ -172,9 +173,12 @@ async def chat_completion(
             503, "litellm is not installed", "api_error", "service_unavailable"
         )
     assert litellm is not None
+    litellm_model, upstream_kwargs = prepare_litellm_model(model)
+    # Named-upstream api_key/api_base win over any caller kwargs of the same name.
+    call_kwargs = {**kwargs, **upstream_kwargs}
     try:
         return await litellm.acompletion(
-            model=model, messages=messages, stream=stream, **kwargs
+            model=litellm_model, messages=messages, stream=stream, **call_kwargs
         )
     except LiteLLM_APIError as exc:  # network / provider errors
         raise map_litellm_error(exc) from exc

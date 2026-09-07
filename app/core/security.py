@@ -74,7 +74,10 @@ async def create_session(account_id: str) -> tuple[str, str]:
     jti = uuid.uuid4().hex
     # exp as epoch seconds (timezone-safe; naive .timestamp() misreads local tz).
     exp = int(time.time()) + SESSION_EXPIRE_MIN * 60
-    expires_at = datetime.datetime.fromtimestamp(exp, tz=datetime.timezone.utc)
+    # Naive UTC — matches DateTime columns / Postgres TIMESTAMP WITHOUT TIME ZONE.
+    expires_at = datetime.datetime.fromtimestamp(exp, tz=datetime.timezone.utc).replace(
+        tzinfo=None
+    )
     async with async_session_factory() as db:
         db.add(Session(jti=jti, account_id=account_id, expires_at=expires_at, revoked=False))
         await db.commit()

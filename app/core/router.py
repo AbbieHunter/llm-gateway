@@ -153,5 +153,5 @@ async def refresh_route_cache(alias: str, db: AsyncSession) -> None:
 
 
 def invalidate_provider_cache(prefix: str) -> None:
-    """Invalidate a single provider entry (no runtime provider edit API today; kept for completeness)."""
+    """Drop a cached provider entry after POST/PATCH so enable/weight apply immediately."""
     _PROVIDER_CACHE.pop(prefix, None)

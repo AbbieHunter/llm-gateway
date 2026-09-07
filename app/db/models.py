@@ -24,7 +24,9 @@ def _uuid() -> str:
 
 
 def _now() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
+    # Naive UTC: SQLite and Postgres TIMESTAMP WITHOUT TIME ZONE both store
+    # naive datetimes; asyncpg rejects aware values (login sessions break).
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
 class Account(Base):

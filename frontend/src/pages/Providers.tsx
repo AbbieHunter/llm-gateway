@@ -73,8 +73,12 @@ export function Providers({ onError }: Props) {
     <div>
       <h2 className="text-xl font-semibold text-slate-800">Provider</h2>
       <p className="mt-1 text-sm text-slate-500">
-        仅填写 provider 前缀（如 <code>openai</code>）。真实凭证在服务器 <code>.env</code> 中配置（如
-        <code>OPENAI_API_KEY</code>），新增后需重启网关生效。
+        登记 provider <strong>前缀</strong>（与模型串第一段一致，如 <code>openai</code>、
+        <code>relay_b</code>）。真实凭证只写在服务器 <code>.env</code>，改完需滚动发布生效：
+        原生前缀用 <code>OPENAI_API_KEY</code> / <code>DEEPSEEK_API_KEY</code> 等；第二路
+        OpenAI 兼容中转用 <code>UPSTREAM_&lt;ID&gt;_API_KEY</code> +
+        <code>UPSTREAM_&lt;ID&gt;_API_BASE</code>（ID 大写，<code>-</code> 变 <code>_</code>）。
+        命名上游的 <code>auth_ref</code> 建议填 <code>openai</code> 表示传输语义。
       </p>
 
       <form onSubmit={create} className="mt-4 bg-white rounded-lg border p-4 flex flex-wrap gap-3 items-end">

@@ -115,6 +115,23 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 ```
 模型 id 用完整串：`openai/qwen-plus-2025-12-01`、`openai/qwen-max` 等（前缀 `openai/` 由 LiteLLM 路由，地址取自 `OPENAI_API_BASE`）。
 
+### 命名上游（第二路 OpenAI 兼容中转）
+
+全局 `OPENAI_API_*` 只能指向**一家**兼容中转。要并存第二家，用独立前缀 + `UPSTREAM_*`：
+
+```bash
+# .env — 第二路（示例名 relay_b）
+UPSTREAM_RELAY_B_API_KEY=sk-...
+UPSTREAM_RELAY_B_API_BASE=https://relay-b.example/v1
+# UPSTREAM_RELAY_B_KIND=openai   # 默认即可
+```
+
+1. 控制台 **Provider** 新建 `id=relay_b`，`auth_ref` 填 `openai`（表示 OpenAI-compatible 传输）。
+2. **路由别名** 候选可混用，例如：`["openai/qwen-plus", "relay_b/qwen-plus"]`（failover）。
+3. 改 env 后执行 `./scripts/rollout_ha.sh`（或单机重建）使凭证生效。
+
+原生厂商（Anthropic 等）继续用 LiteLLM 约定：`ANTHROPIC_API_KEY` + 候选 `anthropic/claude-...`，不要塞进 `UPSTREAM_*`。
+
 ---
 
 ## 配置（`.env` 关键项）
@@ -125,13 +142,14 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 | `BOOTSTRAP_ADMIN_USERNAME` | 管理员用户名 | `admin` |
 | `JWT_SECRET` | JWT 签名密钥（HS256），生产务必随机 | `dev-insecure-change-me` |
 | `REDIS_URL` | Redis 地址；生产必填（`redis://redis:6379`），留空需 `REDIS_FAKE=1` | 空 |
-| `OPENAI_API_KEY` / `OPENAI_API_BASE` | Provider 凭证（env 驱动，不经库/前端） | 空 |
+| `OPENAI_API_KEY` / `OPENAI_API_BASE` | 默认 `openai/` 前缀的凭证与兼容端点 | 空 |
+| `UPSTREAM_<NAME>_API_KEY` / `_API_BASE` / `_KIND` | 命名上游（第二路兼容中转）；候选前缀如 `relay_b` → `UPSTREAM_RELAY_B_*`；`KIND` 默认 `openai` | 空 |
 | `MOCK_PROVIDER` | 测试开关，`1`=走 echo mock + fake embedding；生产必为 `0` | `0` |
 | `SEMANTIC_EMBEDDING_MODEL` / `API_BASE` / `API_KEY` | 语义缓存 embedding 后端（默认 Ollama `quentinz/bge-small-zh-v1.5`） | `quentinz/bge-small-zh-v1.5` / 空（走 Ollama） |
 | `METRICS_ENABLED` | Prometheus `/metrics` 开关 | `1` |
 | `GUARDRAILS_ENABLED` | PII 护栏总开关（默认关） | `0` |
 | `ROUTE_CACHE_TTL_SEC` | 路由别名（model_routes）内存缓存 TTL；写路径（增/改/删别名）会立即失效/刷新对应项，TTL 仅作漏失效兜底 | `60` |
-| `PROVIDER_CACHE_TTL_SEC` | Provider 前缀（providers）内存缓存 TTL；Provider 无运行时编辑接口，靠此 TTL 自愈 | `300` |
+| `PROVIDER_CACHE_TTL_SEC` | Provider 前缀（providers）内存缓存 TTL；启停写路径会立即失效对应项，TTL 仅作漏失效兜底 | `300` |
 | `VK_MAX_INFLIGHT` | 每个虚拟 Key 同时进行中的 `/v1/chat/completions` 上限；超限立刻 `429`（无网关队列）。`0`=不限制 | `8` |
 | `UVICORN_WORKERS` | uvicorn worker 数；**大于 1 时必须用 Postgres**（entrypoint 在 SQLite 下会强制回退为 1） | `1` |
 | `DATABASE_URL` | 元数据库；默认 SQLite。横向扩展：`postgresql+asyncpg://gateway:gateway@postgres:5432/gateway` | `sqlite+aiosqlite:///./data/gateway.db` |
@@ -170,9 +188,12 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 ### 2. Provider（Providers）— 仅管理员
 **作用**：登记「模型提供方前缀」，告诉网关有哪些厂商可用。**注意：这里不存任何密钥。**
 
-- 查看 / 新增 Provider **前缀**（如 `openai`、`deepseek`、`anthropic`）。前缀对应 LiteLLM 模型串的第一段（`openai/xxx` 的 `openai`）。
-- **真实 API Key 写在服务器的 `.env`**（如 `OPENAI_API_KEY=sk-xxx`、`DEEPSEEK_API_KEY=xxx`），网关启动时经**环境变量**读取，绝不落库、也不经前端传输。新增一个 Provider 前缀后，还要在 `.env` 配好对应 key 并 `docker compose up -d` 重建容器才能生效。
-- 第三方 OpenAI 兼容端点还要设 `OPENAI_API_BASE=<base>/v1`（LiteLLM 据此决定 `openai/` 前缀的请求地址）。
+- 查看 / 新增 Provider **前缀**（如 `openai`、`deepseek`、`relay_b`）。前缀对应 LiteLLM/网关模型串的第一段（`openai/xxx` 的 `openai`）。
+- **真实 API Key 写在服务器的 `.env`**，绝不落库、也不经前端传输：
+  - 原生前缀：`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`、`ANTHROPIC_API_KEY` 等（LiteLLM 约定）。
+  - 第二路 OpenAI 兼容中转：`UPSTREAM_<ID>_API_KEY` + `UPSTREAM_<ID>_API_BASE`（见上文「命名上游」）；`<ID>` 为前缀大写且 `-`→`_`。
+- 改 env 后需滚动发布（HA：`./scripts/rollout_ha.sh`）或重建容器才能生效。
+- 默认 `openai/` 的第三方兼容端点还要设 `OPENAI_API_BASE=<base>/v1`。
 
 ### 3. 路由别名（Routes）— 仅管理员
 **作用**：把「一个或多个底层模型」包装成一个**对外暴露的别名**，调用方只认别名、不关心背后是哪个模型；同时决定多模型之间如何选、如何故障转移。

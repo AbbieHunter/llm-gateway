@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.health import list_flagged, set_status
 from app.core.quarantine import delete_quarantined, list_quarantined, restore_quarantined
 from app.core.resilience import reset_circuit
+from app.core.router import invalidate_provider_cache
 from app.core.security import (
     SecurityError,
     create_session,
@@ -392,6 +393,7 @@ async def create_provider(
     db.add(p)
     await db.commit()
     await db.refresh(p)
+    invalidate_provider_cache(p.id)
     return {
         "id": p.id,
         "display_name": p.display_name,
@@ -416,6 +418,7 @@ async def patch_provider(
         if val is not None:
             setattr(p, field, val)
     await db.commit()
+    invalidate_provider_cache(provider_id)
     return {
         "id": p.id,
         "display_name": p.display_name,

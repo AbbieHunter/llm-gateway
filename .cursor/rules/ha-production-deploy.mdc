@@ -1,0 +1,29 @@
+---
+description: Production HA deploy — use rollout_ha.sh, never dual rebuild or down -v
+alwaysApply: true
+---
+
+# Production HA deploy
+
+Cloud production runs dual gateway via `docker-compose.prod.ha.yml`
+(`gateway-a` + `gateway-b` + Postgres + Redis on `card-rules-assistant_default`).
+Public path: Caddy `/gw` → both instances.
+
+## Daily release
+
+```bash
+cd ~/workspace/llm-gateway
+./scripts/rollout_ha.sh
+```
+
+Rebuilds one instance at a time and waits for healthy so the other keeps serving.
+
+## Do not
+
+- `docker compose -f docker-compose.prod.ha.yml up -d --build` on **both** gateways together (causes downtime)
+- `docker compose down -v` (destroys Postgres/Redis volumes)
+- Point Caddy back at the old single `gateway:8000` service
+
+## First-time / cutover only
+
+Initial bring-up and Caddy dual-upstream cutover are documented in `deploy/README.md` (HA section). After cutover, use `rollout_ha.sh` only.
