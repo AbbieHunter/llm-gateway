@@ -9,6 +9,9 @@ Usage (from repo root, with deps installed):
 
 Idempotent for empty target tables; aborts if the target already has rows in
 `accounts` (refuse to clobber a live DB). Does NOT copy Redis state.
+
+Tables missing from the source SQLite (e.g. quarantined_models on an older DB)
+are skipped with a note.
 """
 from __future__ import annotations
 
@@ -21,9 +24,9 @@ if PROJECT_ROOT not in sys.path:
 
 import asyncio
 
-from sqlalchemy import create_engine, select, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine, inspect, select, text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session, make_transient
 
 from app.db.models import (
     Account,
@@ -62,14 +65,13 @@ async def main() -> int:
     src_engine = create_engine(f"sqlite:///{src_path}")
     dst_engine = create_async_engine(dst_url, echo=False)
     dst_factory = async_sessionmaker(dst_engine, expire_on_commit=False)
+    src_tables = set(inspect(src_engine).get_table_names())
 
     async with dst_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
     async with dst_factory() as dst:
-        n = (
-            await dst.execute(text("SELECT COUNT(*) FROM accounts"))
-        ).scalar_one()
+        n = (await dst.execute(text("SELECT COUNT(*) FROM accounts"))).scalar_one()
         if int(n) > 0:
             print(
                 f"Target already has {n} accounts — aborting to avoid overwrite.",
@@ -79,10 +81,17 @@ async def main() -> int:
 
         with Session(src_engine) as src:
             for model in TABLES:
+                table = model.__tablename__
+                if table not in src_tables:
+                    print(f"skip {table}: not present in source SQLite")
+                    continue
                 rows = src.execute(select(model)).scalars().all()
                 for row in rows:
-                    dst.merge(row)
-                print(f"copied {model.__tablename__}: {len(rows)}")
+                    # Detach from SQLite session and insert into Postgres.
+                    src.expunge(row)
+                    make_transient(row)
+                    dst.add(row)
+                print(f"copied {table}: {len(rows)}")
         await dst.commit()
 
     await dst_engine.dispose()
