@@ -11,6 +11,8 @@
 #    适配本机仅剩 7.4G 的空间。
 #  * 启动：在仓库目录执行
 #        docker compose -f docker-compose.prod.yml up -d --build
+#  * 零停机双实例：见 docker-compose.prod.ha.yml + scripts/rollout_ha.sh
+#    （Postgres + gateway-a/b；日常发版勿对本文件一把梭 --build）
 # ============================================================================
 services:
   redis:

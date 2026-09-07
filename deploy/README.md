@@ -59,3 +59,79 @@ uvicorn app.main:app --port 8000
 embedding 服务不可用 / `SEMANTIC_EMBEDDING_API_BASE` 为空时，语义层**优雅降级**
 （embedding 失败 → 跳过语义层走上游，不阻断请求，只是不再命中语义缓存）。
 所以即使 embedding 服务没起来，网关也能正常服务，只是语义缓存不生效。
+
+---
+
+## HA / 滚动发布（根治部署空窗）
+
+云上生产推荐路径：[`docker-compose.prod.ha.yml`](../docker-compose.prod.ha.yml)
+（Postgres + `gateway-a` + `gateway-b` + Redis，无宿主机端口，挂在 `card-rules-assistant_default`）。
+
+```
+Clients → Caddy /gw → gateway-a + gateway-b → Redis + Postgres
+```
+
+日常发版只滚动替换一台，另一台继续接流量：
+
+```bash
+cd ~/workspace/llm-gateway
+./scripts/rollout_ha.sh
+```
+
+**禁止**对 HA 使用 `docker compose -f docker-compose.prod.ha.yml up -d --build`
+（会同时 recreate 两台，重新制造空窗）。
+
+### 首次从「单 gateway + SQLite」切换（防空窗顺序）
+
+前置：在服务器 `.env` 写入 `POSTGRES_PASSWORD`（字母数字为宜，避免 `@ : /`
+破坏 compose 拼出的 `DATABASE_URL`）。已有 `BOOTSTRAP_ADMIN_PASSWORD` /
+`JWT_SECRET` / Provider key 保持不变。
+
+1. **拉代码**到含 HA 文件的 commit。
+2. **只起 Postgres**（此时旧 `gateway` 仍在服务）：
+   ```bash
+   docker compose -f docker-compose.prod.ha.yml up -d postgres
+   ```
+3. **短停写 + 迁移**（旧单实例短暂停服窗口）：
+   ```bash
+   docker compose -f docker-compose.prod.yml stop gateway
+   # 在能访问 postgres:5432 的环境跑迁移（示例：临时容器挂到同一网络）
+   docker run --rm --network card-rules-assistant_default \
+     -v "$PWD/data:/data:ro" -v "$PWD:/app" -w /app \
+     -e SOURCE_SQLITE=/data/gateway.db \
+     -e DATABASE_URL="postgresql+asyncpg://gateway:${POSTGRES_PASSWORD}@postgres:5432/gateway" \
+     python:3.12-slim bash -c "pip install -q -r requirements.txt && python scripts/migrate_sqlite_to_postgres.py"
+   ```
+   目标库若已有 `accounts` 行，脚本会拒绝覆盖。
+4. **起双实例 + Redis**（不要碰旧 Caddy 上游名之前先确认 health）：
+   ```bash
+   docker compose -f docker-compose.prod.ha.yml up -d redis gateway-a gateway-b
+   # 或：./scripts/rollout_ha.sh
+   docker compose -f docker-compose.prod.ha.yml ps
+   ```
+5. **改 Caddy 为双上游**（`card-rules-assistant` 仓库的 Caddyfile）：
+   - 参考本目录 [`Caddyfile.gw.ha.snippet`](Caddyfile.gw.ha.snippet)
+   - 将 `reverse_proxy gateway:8000` 换成 `gateway-a:8000 gateway-b:8000`
+   - reload，例如：
+     ```bash
+     docker exec card-rules-caddy caddy reload --config /etc/caddy/Caddyfile
+     ```
+6. **验证**：
+   - `curl -sS https://www.asdfghjkl.site/gw/healthz`
+   - 控制台登录、一次 chat
+   - `docker compose -f docker-compose.prod.ha.yml stop gateway-a` 后 healthz / chat 仍通；再 `start gateway-a`
+7. **停掉旧单实例**（若仍在旧 compose 项目中）：
+   ```bash
+   docker compose -f docker-compose.prod.yml stop gateway
+   # 确认无流量后再考虑 rm；不要 docker compose down -v
+   ```
+
+顺序口诀：**迁库 → 起双实例 → 改 Caddy → 再停旧 gateway**。
+若先停旧实例再改 Caddy，中间会无上游。
+
+### 优雅退出
+
+[`scripts/entrypoint.sh`](../scripts/entrypoint.sh) 使用
+`--timeout-graceful-shutdown 30`；HA compose 上
+`stop_grace_period: 35s`。滚动时被替换的那台会尽量收尾短请求；
+超长 SSE 仍可能断在被摘掉的实例上，另一台继续服务新连接。

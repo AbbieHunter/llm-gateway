@@ -2,10 +2,12 @@
 # Gateway process entrypoint.
 # Multi-worker (UVICORN_WORKERS>1) is only safe with a shared DB (Postgres).
 # SQLite + multiple workers would corrupt / lock the single file — refuse and fall back.
+# --timeout-graceful-shutdown: drain in-flight requests on SIGTERM (rolling deploys).
 set -eu
 
 WORKERS="${UVICORN_WORKERS:-1}"
 DB_URL="${DATABASE_URL:-sqlite+aiosqlite:///./data/gateway.db}"
+GRACE="${UVICORN_GRACEFUL_TIMEOUT_SEC:-30}"
 
 case "$DB_URL" in
   sqlite*)
@@ -17,4 +19,6 @@ case "$DB_URL" in
     ;;
 esac
 
-exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers "$WORKERS"
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000 \
+  --workers "$WORKERS" \
+  --timeout-graceful-shutdown "$GRACE"

@@ -1,10 +1,8 @@
 # ============================================================================
-# Optional Postgres + multi-worker overlay for scale-out.
-# Default prod compose stays on SQLite (fits the small cloud box).
-# When usage_logs / concurrency outgrow single-file SQLite:
+# Optional Postgres overlay (single gateway + multi-worker).
+# Prefer docker-compose.prod.ha.yml (dual instance + rolling) for zero-downtime deploys.
 #
-#   docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml \
-#     up -d --build
+#   docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml up -d --build
 #
 # Migrate existing SQLite data once (empty target only):
 #   SOURCE_SQLITE=./data/gateway.db \

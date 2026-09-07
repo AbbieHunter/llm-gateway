@@ -1,0 +1,112 @@
+# ============================================================================
+# HA production compose: Postgres + gateway-a/b dual instance + Redis
+# ----------------------------------------------------------------------------
+# Zero/near-zero downtime deploys via rolling recreate (see scripts/rollout_ha.sh).
+# Do NOT `up -d --build` both gateways at once — that recreates the outage window.
+#
+# First cutover (SQLite → Postgres + Caddy dual upstream):
+#   see deploy/README.md § HA / rolling
+#
+# Daily release (after cutover):
+#   ./scripts/rollout_ha.sh
+#
+# Required in .env (in addition to existing gateway secrets):
+#   POSTGRES_PASSWORD=<strong random>
+# Optional:
+#   POSTGRES_USER=gateway  POSTGRES_DB=gateway
+# ============================================================================
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gateway}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-gateway}
+    # Low-memory tuning for ~3.6Gi shared host
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_buffers=64MB"
+      - "-c"
+      - "work_mem=4MB"
+      - "-c"
+      - "maintenance_work_mem=32MB"
+      - "-c"
+      - "effective_cache_size=256MB"
+      - "-c"
+      - "max_connections=50"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - default
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    volumes:
+      - redis-data:/data
+    networks:
+      - default
+
+  gateway-a: &gateway
+    build:
+      context: .
+      args:
+        PIP_INDEX: https://mirrors.aliyun.com/pypi/simple/
+        NPM_REGISTRY: https://registry.npmmirror.com
+        APT_MIRROR: mirrors.aliyun.com
+        VITE_API_BASE: "/gw"
+    restart: unless-stopped
+    stop_grace_period: 35s
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      - REDIS_FAKE=0
+      - MOCK_PROVIDER=0
+      - REDIS_URL=redis://redis:6379
+      - SEMANTIC_CACHE_ENABLE=1
+      - UVICORN_WORKERS=1
+      - DATA_DIR=/app/data
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-gateway}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gateway}
+    healthcheck:
+      test:
+        - "CMD"
+        - "python"
+        - "-c"
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/healthz').status==200 else 1)"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    volumes:
+      - ./data:/app/data
+    networks:
+      - default
+
+  gateway-b:
+    <<: *gateway
+
+volumes:
+  redis-data:
+  postgres-data:
+
+networks:
+  default:
+    external: true
+    name: card-rules-assistant_default

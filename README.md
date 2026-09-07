@@ -357,21 +357,26 @@ cd frontend && npm install && npm run build && npm run dev
 - **模型须真实存在于该端点**：别名里只放确认存在的模型 id，否则上游 404 会原样返回（按 Plan B 只标记该候选）。
 - 非 OpenAI 模型的 token 计数为估算，成本以 Provider 账单为准。
 
-### 横向扩展（Postgres + 多 worker）
+### 横向扩展 / 零停机发布（Postgres + 双实例滚动）
 
-默认仍用 SQLite，适合当前云主机体量。当用量写入 / 并发成为瓶颈时：
+单机 `docker-compose.prod.yml`（1×gateway + SQLite）重建容器时会有短空窗。要根治部署中断，改用 **HA compose**：
 
-1. 叠加 Postgres compose 并重建：
-   ```bash
-   docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml up -d --build
-   ```
-2. 一次性迁移元数据（目标库须为空，否则脚本拒绝覆盖）：
-   ```bash
-   SOURCE_SQLITE=./data/gateway.db \
-   DATABASE_URL=postgresql+asyncpg://gateway:gateway@postgres:5432/gateway \
-   python scripts/migrate_sqlite_to_postgres.py
-   ```
-3. `UVICORN_WORKERS` 默认在 postgres overlay 里为 `2`；可按机器调大。共享状态（配额/缓存/熔断）继续走 Redis。
+| 文件 | 用途 |
+|------|------|
+| [`docker-compose.prod.ha.yml`](docker-compose.prod.ha.yml) | Postgres + `gateway-a` / `gateway-b` + Redis |
+| [`scripts/rollout_ha.sh`](scripts/rollout_ha.sh) | **日常发布**：先重建 A 等 healthy，再重建 B |
+| [`deploy/Caddyfile.gw.ha.snippet`](deploy/Caddyfile.gw.ha.snippet) | Caddy `/gw` 双上游片段 |
+| [`deploy/README.md`](deploy/README.md) | 首次切换（SQLite→PG + 改 Caddy）完整顺序 |
+
+**日常发版（已切 HA 后）**——不要对两台同时 `up -d --build`：
+
+```bash
+./scripts/rollout_ha.sh
+```
+
+**首次切换**必须按「起 Postgres → 迁库 → 起双实例 → 改 Caddy → 停旧单实例」顺序，详见 [`deploy/README.md`](deploy/README.md)「HA / 滚动发布」。`.env` 需设置 `POSTGRES_PASSWORD`（建议字母数字，避免 `@:` 破坏 URL）。
+
+每个 gateway 容器固定 `UVICORN_WORKERS=1`（双机各 1）；共享状态继续走 Redis。超长 SSE 在被摘掉的那台上仍可能中断，新请求由另一台承接——调用方建议失败重试。
 
 ---
 
@@ -411,7 +416,7 @@ A. 这是**前端 API 前缀（`BASE`）与实际访问路径对不上**。源�
 - `docs/product/`：PRD、产品设计、用户故事
 - `docs/technical/`：架构 `ARCHITECTURE.md`、各里程碑开发计划
 - `docs/meetings/`：各里程碑评审纪要
-- `deploy/`：部署参考（含可选 sentence-transformers embedding 服务）
+- `deploy/`：部署参考（embedding、**HA 双实例滚动** / Caddy 片段见 `deploy/README.md`）
 
 ## 测试
 

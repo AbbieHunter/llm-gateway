@@ -1,0 +1,20 @@
+# Drop-in replacement for the /gw reverse_proxy block on www.asdfghjkl.site
+# (card-rules-assistant Caddyfile). Apply AFTER gateway-a and gateway-b are healthy.
+#
+# Before (single instance — deploy recreate causes downtime):
+#   reverse_proxy gateway:8000
+#
+# After (dual instance — rolling recreate keeps one upstream up):
+
+handle /gw {
+	redir https://www.asdfghjkl.site/gw/ permanent
+}
+handle /gw/* {
+	uri strip_prefix /gw
+	reverse_proxy gateway-a:8000 gateway-b:8000 {
+		lb_policy round_robin
+		health_uri /healthz
+		health_interval 10s
+		health_timeout 3s
+	}
+}
