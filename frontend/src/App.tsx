@@ -52,7 +52,7 @@ export function App() {
       key: "dashboard",
       label: "概览",
       adminOnly: false,
-      desc: "全局仪表盘：活跃虚拟 Key、今日请求 / Token、估算成本，以及被标记额度耗尽或降级的异常模型一键重置。",
+      desc: "全局仪表盘：活跃虚拟 Key、今日请求 / 花费，以及额度耗尽后从别名移出的隔离模型（可恢复 / 彻底删除）。",
     },
     {
       key: "keys",

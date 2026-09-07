@@ -137,10 +137,17 @@ def test_quota_fallback_transparent(client: TestClient) -> None:
     assert r.status_code == 200, f"fallback should succeed: {r.status_code} {r.text}"
     # Response came from the backup provider, not the quota-exhausted one.
     assert r.json()["model"] == "deepseek/echo"
-    # The failed primary was marked (per-candidate, Plan-B); the backup is healthy.
-    assert asyncio.run(get_status("openai/echo?__quota=1")) == "quota_exhausted"
+    # Exhausted primary was quarantined out of the alias (durable); Redis mark cleared.
+    routes = client.get("/api/routes", cookies={"gw_session": admin}).json()
+    m3fb = next(r for r in routes if r["alias"] == "m3fb")
+    assert "openai/echo?__quota=1" not in m3fb["providers"]
+    assert m3fb["providers"] == ["deepseek/echo"]
+    ov = client.get("/api/dashboard/overview", cookies={"gw_session": admin}).json()
+    q = [x for x in ov["quarantined"] if x["alias"] == "m3fb" and x["model"] == "openai/echo?__quota=1"]
+    assert len(q) == 1
+    assert asyncio.run(get_status("openai/echo?__quota=1")) == "healthy"
     assert asyncio.run(get_status("deepseek/echo")) == "healthy"
-    print("[OK] quota-aware fallback: transparent switch to backup + mark failed candidate")
+    print("[OK] quota-aware fallback: transparent switch + durable quarantine")
 
 
 def test_all_candidates_fail_502_detail(client: TestClient) -> None:
@@ -391,10 +398,68 @@ def test_dashboard_overview(client: TestClient) -> None:
     r = client.get("/api/dashboard/overview", cookies={"gw_session": admin})
     assert r.status_code == 200
     d = r.json()
-    for k in ("today_calls", "today_spend_usd", "error_rate", "active_keys", "anomalies"):
+    for k in ("today_calls", "today_spend_usd", "error_rate", "active_keys", "anomalies", "quarantined"):
         assert k in d, f"dashboard missing {k}"
     assert isinstance(d["anomalies"], list)
-    print("[OK] dashboard overview: four cards + anomalies present")
+    assert isinstance(d["quarantined"], list)
+    print("[OK] dashboard overview: four cards + quarantined + anomalies present")
+
+
+def test_quarantine_restore_and_delete(client: TestClient) -> None:
+    admin = _admin(client)
+    me = client.get("/api/me", cookies={"gw_session": admin}).json()
+    rk = client.post(
+        "/api/keys",
+        json={"name": "m3q-key", "owner_account_id": me["id"]},
+        cookies={"gw_session": admin},
+    ).json()
+    vk = rk["key"]
+    client.post(
+        "/api/routes",
+        json={
+            "alias": "m3q",
+            "providers": ["openai/echo?__quota=1", "deepseek/echo"],
+            "strategy": "failover",
+        },
+        cookies={"gw_session": admin},
+    )
+    r = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {vk}"},
+        json={"model": "m3q", "stream": False, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert r.status_code == 200
+    ov = client.get("/api/dashboard/overview", cookies={"gw_session": admin}).json()
+    q = next(x for x in ov["quarantined"] if x["alias"] == "m3q")
+    # Restore puts the model back on the alias.
+    rr = client.post(f"/api/quarantine/{q['id']}/restore", cookies={"gw_session": admin})
+    assert rr.status_code == 200, rr.text
+    routes = client.get("/api/routes", cookies={"gw_session": admin}).json()
+    m3q = next(x for x in routes if x["alias"] == "m3q")
+    assert "openai/echo?__quota=1" in m3q["providers"]
+    # Put exhausted model first again so the next call re-triggers quarantine.
+    client.patch(
+        "/api/routes/m3q",
+        json={"providers": ["openai/echo?__quota=1", "deepseek/echo"]},
+        cookies={"gw_session": admin},
+    )
+    # Quarantine again then permanently delete — model stays off the alias.
+    r2 = client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {vk}"},
+        json={"model": "m3q", "stream": False, "messages": [{"role": "user", "content": "hi2"}]},
+    )
+    assert r2.status_code == 200
+    ov2 = client.get("/api/dashboard/overview", cookies={"gw_session": admin}).json()
+    q2 = next(x for x in ov2["quarantined"] if x["alias"] == "m3q")
+    rd = client.delete(f"/api/quarantine/{q2['id']}", cookies={"gw_session": admin})
+    assert rd.status_code == 200, rd.text
+    routes2 = client.get("/api/routes", cookies={"gw_session": admin}).json()
+    m3q2 = next(x for x in routes2 if x["alias"] == "m3q")
+    assert "openai/echo?__quota=1" not in m3q2["providers"]
+    ov3 = client.get("/api/dashboard/overview", cookies={"gw_session": admin}).json()
+    assert not any(x["alias"] == "m3q" for x in ov3["quarantined"])
+    print("[OK] quarantine restore puts model back; delete drops record only")
 
 
 # ---------- T-09: estimate flag on non-OpenAI ----------

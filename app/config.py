@@ -23,6 +23,9 @@ KNOWN_MODELS = [
 ]
 
 # --- M1 configuration (see M1_DEV_PLAN §2.9 / §2.10) ---
+# SQLite (default) or Postgres. Examples:
+#   sqlite+aiosqlite:///./data/gateway.db
+#   postgresql+asyncpg://gateway:gateway@postgres:5432/gateway
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./data/gateway.db")
 
 BOOTSTRAP_ADMIN_USERNAME = os.getenv("BOOTSTRAP_ADMIN_USERNAME", "admin")
@@ -59,6 +62,15 @@ CB_COOLDOWN_SEC = int(os.getenv("CB_COOLDOWN_SEC", "30"))
 # Retry: max attempts for a retryable error within a single request (exp backoff + jitter).
 RETRY_MAX = int(os.getenv("RETRY_MAX", "3"))
 
+# Per-VK in-flight concurrency cap for /v1/chat/completions (no queue; excess -> 429).
+# Default 8 suits small-team parallel chats. 0 (or negative) = unlimited.
+VK_MAX_INFLIGHT = int(os.getenv("VK_MAX_INFLIGHT", "8"))
+
+# Uvicorn worker processes. >1 requires a non-SQLite DATABASE_URL (Postgres).
+# entrypoint.sh enforces this so multi-worker never shares one SQLite file.
+UVICORN_WORKERS = int(os.getenv("UVICORN_WORKERS", "1"))
+
+
 # Probe: interval for quota_exhausted auto-recovery sweep (R3).
 PROBE_INTERVAL_SEC = int(os.getenv("PROBE_INTERVAL_SEC", "600"))
 # Probe failure backoff: doubles each failure, capped here (R3).
@@ -71,8 +83,12 @@ CACHE_TTL_SEC = int(os.getenv("CACHE_TTL_SEC", "3600"))
 # These are runtime-mutable and persisted next to the DB so an admin can toggle
 # caching from the web console without a restart or code change. Startup
 # precedence: env default -> persisted data/cache_config.json override.
-_DB_PATH = DATABASE_URL.replace("sqlite+aiosqlite:///", "").replace("sqlite:///", "")
-DATA_DIR = os.path.dirname(_DB_PATH) or "."
+if DATABASE_URL.startswith("sqlite"):
+    _DB_PATH = DATABASE_URL.replace("sqlite+aiosqlite:///", "").replace("sqlite:///", "")
+    DATA_DIR = os.path.dirname(_DB_PATH) or "."
+else:
+    # Postgres (and other non-file DBs): keep cache_config.json under ./data.
+    DATA_DIR = os.getenv("DATA_DIR", "./data")
 CACHE_CONFIG_PATH = os.path.join(DATA_DIR, "cache_config.json")
 
 _cache_cfg = {

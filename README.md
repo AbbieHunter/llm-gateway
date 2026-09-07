@@ -15,7 +15,7 @@
   - `weighted`（按权重比分配流量）。
 - **高可用**：配额感知故障转移、熔断 + 退避重试、运行时状态自愈探活。
 - **流式**：SSE 流式响应；流式中途出错会补发 OpenAI 错误事件，不静默断流。
-- **限流**：按虚拟 Key 的**每日 token 硬限额**（本地时区自然日重置）。
+- **限流**：按虚拟 Key 的**每日 token 硬限额**（本地时区自然日重置）+ **进行中请求并发上限**（默认每 Key 最多 8 路，超限立刻 `429`，不排队；`VK_MAX_INFLIGHT=0` 关闭）。
 - **缓存**：精确缓存（同请求零上游）+ 语义缓存（Tier2，bge 向量相似命中，可插拔 embedding 后端）。
 - **成本路由（cost）**：最便宜优先；缺价时兜底。
 - **用量报表**：按 Key / 模型 / 账号三维用量 + 估算成本（软观测）+ CSV 导出（90 天窗 / 10 万行限 / 公式注入防护）。
@@ -132,6 +132,9 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 | `GUARDRAILS_ENABLED` | PII 护栏总开关（默认关） | `0` |
 | `ROUTE_CACHE_TTL_SEC` | 路由别名（model_routes）内存缓存 TTL；写路径（增/改/删别名）会立即失效/刷新对应项，TTL 仅作漏失效兜底 | `60` |
 | `PROVIDER_CACHE_TTL_SEC` | Provider 前缀（providers）内存缓存 TTL；Provider 无运行时编辑接口，靠此 TTL 自愈 | `300` |
+| `VK_MAX_INFLIGHT` | 每个虚拟 Key 同时进行中的 `/v1/chat/completions` 上限；超限立刻 `429`（无网关队列）。`0`=不限制 | `8` |
+| `UVICORN_WORKERS` | uvicorn worker 数；**大于 1 时必须用 Postgres**（entrypoint 在 SQLite 下会强制回退为 1） | `1` |
+| `DATABASE_URL` | 元数据库；默认 SQLite。横向扩展：`postgresql+asyncpg://gateway:gateway@postgres:5432/gateway` | `sqlite+aiosqlite:///./data/gateway.db` |
 
 ---
 
@@ -143,7 +146,7 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 | 菜单 | 谁可见 | 一句话说明（即控制台内展示的文案） |
 |------|--------|--------------------------------------|
-| 概览 | 所有人 | 全局仪表盘：活跃虚拟 Key、今日请求 / Token、估算成本，以及被标记额度耗尽或降级的异常模型一键重置。 |
+| 概览 | 所有人 | 全局仪表盘：活跃虚拟 Key、今日请求 / Token、估算成本，以及额度耗尽后从别名移出的隔离模型（可恢复 / 彻底删除）。 |
 | 虚拟 Key | 所有人 | 创建与管理的调用凭证（VK）。明文仅创建时显示一次；可按归属账号设定每日 Token 限额，支持重置与删除。 |
 | 用量报表 | 所有人 | 按 虚拟 Key / 模型 / 账号 三维查看请求数、Token 消耗与估算成本，支持 CSV 导出（90 天窗口）。 |
 | Provider | 仅管理员 | 配置模型提供方前缀（如 openai / deepseek）。这里只登记前缀，真实 API Key 写在服务器 .env，由网关经环境变量读取，不入库。 |
@@ -162,7 +165,7 @@ OPENAI_API_BASE=https://dashscope.aliyuncs.com/compatible-mode/v1
   - 今日请求数。
   - 今日 Token 消耗（含 prompt + completion）。
   - 估算成本（软观测，非硬限额；非 OpenAI 模型为估算值，以 Provider 账单为准）。
-- **近期异常**：列出运行中被标记为 `quota_exhausted`（额度耗尽）或 `degraded`（降级）的**具体模型或 Provider**（按完整候选串粒度，如 `openai/qwen-plus-2025-12-01`）。点「重置」即可清除其 Redis 运行时状态、闭合熔断，恢复候选资格——**无需重启网关**。这是上游额度耗尽后的自愈入口。
+- **近期异常 / 额度耗尽隔离**：识别到上游额度耗尽后，模型会**自动从所属别名候选列表移出**并进入概览页「额度耗尽隔离」（持久化，不会因探活在第二天又被调用）。可「恢复」回别名，或「彻底删除」隔离记录。
 
 ### 2. Provider（Providers）— 仅管理员
 **作用**：登记「模型提供方前缀」，告诉网关有哪些厂商可用。**注意：这里不存任何密钥。**
@@ -347,9 +350,28 @@ cd frontend && npm install && npm run build && npm run dev
 ## 已知约束 / 注意
 
 - **无"按模型主动封顶"**：网关只在**上游真的返回额度错误**后才反应式标记 `quota_exhausted`；VK 的每日 token 限额是硬限额（per-key，跨所有模型）。
+- **无同模型请求队列**：多个 Key 同时打同一模型会**并行**打上游，不会在网关内互相等待；若要保护上游，靠 `VK_MAX_INFLIGHT` / 日额度 / Provider 限流。
+- **多人使用建议**：一人（或一应用）一虚拟 Key，并为每个 Key 设 `daily_token_quota`；不要多人共用一把 Key。
+- **SQLite 并发**：库启用 WAL + `busy_timeout`；单机小团队够用。不要对同一 SQLite 文件开多 uvicorn worker——若要多进程，先迁 Postgres（见下方「横向扩展」）。
 - **额度错误识别依赖英文串**：`classify_error` 认 `insufficient_quota` / `insufficient_balance` / `quota_exceeded` 等；若 Provider 返回中文"额度不足"或纯 429，会被归为 `RATE_LIMITED`（重试/退避）而非 `QUOTA_EXHAUSTED`，届时需在 `errors.py` 扩关键词。
 - **模型须真实存在于该端点**：别名里只放确认存在的模型 id，否则上游 404 会原样返回（按 Plan B 只标记该候选）。
 - 非 OpenAI 模型的 token 计数为估算，成本以 Provider 账单为准。
+
+### 横向扩展（Postgres + 多 worker）
+
+默认仍用 SQLite，适合当前云主机体量。当用量写入 / 并发成为瓶颈时：
+
+1. 叠加 Postgres compose 并重建：
+   ```bash
+   docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml up -d --build
+   ```
+2. 一次性迁移元数据（目标库须为空，否则脚本拒绝覆盖）：
+   ```bash
+   SOURCE_SQLITE=./data/gateway.db \
+   DATABASE_URL=postgresql+asyncpg://gateway:gateway@postgres:5432/gateway \
+   python scripts/migrate_sqlite_to_postgres.py
+   ```
+3. `UVICORN_WORKERS` 默认在 postgres overlay 里为 `2`；可按机器调大。共享状态（配额/缓存/熔断）继续走 Redis。
 
 ---
 
@@ -394,6 +416,7 @@ A. 这是**前端 API 前缀（`BASE`）与实际访问路径对不上**。源�
 ## 测试
 
 ```bash
-python scripts/smoke_m3.py   # 路由/故障转移/缓存/配额感知
-python scripts/smoke_m4.py   # 语义缓存/cost/CSV/metrics/护栏
+python scripts/smoke_m3.py          # 路由/故障转移/缓存/配额感知
+python scripts/smoke_m4.py          # 语义缓存/cost/CSV/metrics/护栏
+python scripts/smoke_concurrency.py # VK 并发闸门 + SQLite WAL
 ```

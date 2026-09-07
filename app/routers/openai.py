@@ -36,6 +36,8 @@ from app.core.errors import (
     to_openai_error_body,
 )
 from app.core.health import DEGRADED, QUOTA_EXHAUSTED, set_status
+from app.core import concurrency as vk_concurrency
+from app.core.quarantine import quarantine_exhausted
 from app.core.quota import check_quota, incr_quota
 from app.core.resilience import backoff_sleep, record_outcome
 from app.core.router import resolve
@@ -258,13 +260,14 @@ async def _nonstream_response(
             except Exception as exc:  # noqa: BLE001
                 cat = classify_error(exc, candidate)
                 if cat == ErrorCategory.QUOTA_EXHAUSTED:
-                    # Mark + switch, no retry (retrying quota is pointless).
-                    # Plan-B: mark the *candidate* (full model string), NOT the
-                    # provider prefix, so exhausting one model's budget only
-                    # skips that model — siblings sharing the same openai/ prefix
-                    # (e.g. many free models behind one compatible-mode endpoint)
-                    # keep serving.
-                    await set_status(candidate, QUOTA_EXHAUSTED)
+                    # Persistently remove from the alias (survives overnight probe
+                    # recovery). Falls back to Redis-only mark when req.model is
+                    # not a registered alias.
+                    quarantined = await quarantine_exhausted(
+                        req.model, candidate, db=db
+                    )
+                    if quarantined is None:
+                        await set_status(candidate, QUOTA_EXHAUSTED)
                     await record_outcome(candidate, False)
                     metrics.inc_counter("gateway_quota_marked_total", {"provider": candidate})
                     errors.append(
@@ -346,7 +349,12 @@ async def _open_stream_with_retry(
 
 
 async def _stream_response(
-    req: ChatRequest, vk: VKContext, candidates: list[str], request: Request
+    req: ChatRequest,
+    vk: VKContext,
+    candidates: list[str],
+    request: Request,
+    *,
+    release_inflight: bool = False,
 ) -> StreamingResponse:
     messages = [m.model_dump() for m in req.messages]
     passthrough = _passthrough(req)
@@ -359,7 +367,9 @@ async def _stream_response(
         )
         if stream is None:
             if cat == ErrorCategory.QUOTA_EXHAUSTED:
-                await set_status(candidate, QUOTA_EXHAUSTED)
+                quarantined = await quarantine_exhausted(req.model, candidate)
+                if quarantined is None:
+                    await set_status(candidate, QUOTA_EXHAUSTED)
             elif cat != ErrorCategory.AUTH_ERROR:
                 await set_status(candidate, DEGRADED)
             await record_outcome(candidate, False)
@@ -371,7 +381,17 @@ async def _stream_response(
         await set_status(candidate, "healthy")
         await record_outcome(candidate, True)
         return StreamingResponse(
-            _sse_generator(stream, first, candidate, vk, messages, request, start, alias=req.model),
+            _sse_generator(
+                stream,
+                first,
+                candidate,
+                vk,
+                messages,
+                request,
+                start,
+                alias=req.model,
+                release_inflight=release_inflight,
+            ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
@@ -425,6 +445,7 @@ async def _sse_generator(
     request: Request,
     start: float,
     alias: str | None = None,
+    release_inflight: bool = False,
 ) -> Any:
     completion_tokens = 0
     model_used = candidate
@@ -474,6 +495,11 @@ async def _sse_generator(
             await incr_quota(vk.vk_id, pt + completion_tokens)
         except Exception:  # noqa: BLE001
             pass
+        if release_inflight:
+            try:
+                await vk_concurrency.release(vk.vk_id)
+            except Exception:  # noqa: BLE001
+                pass
         _record_request_metrics(model_used, status, latency / 1000.0, pt + completion_tokens)
 
 
@@ -531,26 +557,50 @@ async def chat_completions(
                 headers={"Retry-After": str(retry_after)},
             )
 
-    # Inbound PII redaction (M4, R8): strip PII from the prompt before it leaves
-    # for the upstream provider. Default OFF; streaming still gets inbound only.
-    if inbound_enabled():
-        for m in req.messages:
-            m.content = redact_message_content(m.content)
-
-    est_prompt = sum(len(str(m.content or "")) for m in req.messages) if not req.stream else None
-    candidates = await resolve(req.model, db, est_prompt_tokens=est_prompt)
-    if not candidates:
+    # --- per-VK in-flight concurrency gate (no queue; excess -> 429) ---
+    if not await vk_concurrency.try_acquire(vk.vk_id):
         raise GatewayError(
-            502,
-            f"no available provider for model '{req.model}' "
-            f"(all candidates disabled or unhealthy)",
-            "api_error",
-            "no_available_provider",
+            429,
+            f"too many in-flight requests for this key "
+            f"(limit={vk_concurrency.max_inflight()})",
+            "rate_limit_error",
+            "concurrency_exceeded",
+            headers={"Retry-After": "1"},
         )
 
-    if req.stream:
-        return await _stream_response(req, vk, candidates, request)
-    return await _nonstream_response(req, vk, candidates, db)
+    # Stream handoff: SSE generator owns the slot until it finishes.
+    # Non-stream / early errors: release in the finally below.
+    handed_off_to_sse = False
+    try:
+        # Inbound PII redaction (M4, R8): strip PII from the prompt before it leaves
+        # for the upstream provider. Default OFF; streaming still gets inbound only.
+        if inbound_enabled():
+            for m in req.messages:
+                m.content = redact_message_content(m.content)
+
+        est_prompt = (
+            sum(len(str(m.content or "")) for m in req.messages) if not req.stream else None
+        )
+        candidates = await resolve(req.model, db, est_prompt_tokens=est_prompt)
+        if not candidates:
+            raise GatewayError(
+                502,
+                f"no available provider for model '{req.model}' "
+                f"(all candidates disabled or unhealthy)",
+                "api_error",
+                "no_available_provider",
+            )
+
+        if req.stream:
+            resp = await _stream_response(
+                req, vk, candidates, request, release_inflight=True
+            )
+            handed_off_to_sse = True
+            return resp
+        return await _nonstream_response(req, vk, candidates, db)
+    finally:
+        if not handed_off_to_sse:
+            await vk_concurrency.release(vk.vk_id)
 
 
 @router.get("/models")

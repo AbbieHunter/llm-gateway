@@ -62,6 +62,10 @@ export const api = {
     req(`/api/providers/${encodeURIComponent(id)}/reset-status`, { method: "POST" }),
 
   dashboardOverview: () => req("/api/dashboard/overview"),
+  restoreQuarantine: (id: string) =>
+    req(`/api/quarantine/${encodeURIComponent(id)}/restore`, { method: "POST" }),
+  deleteQuarantine: (id: string) =>
+    req(`/api/quarantine/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   getCacheConfig: () => req("/api/cache-config"),
   setCacheConfig: (b: { exact: boolean; semantic: boolean }) =>

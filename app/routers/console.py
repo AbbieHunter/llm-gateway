@@ -25,6 +25,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.health import list_flagged, set_status
+from app.core.quarantine import delete_quarantined, list_quarantined, restore_quarantined
 from app.core.resilience import reset_circuit
 from app.core.security import (
     SecurityError,
@@ -806,16 +807,12 @@ async def dashboard_overview(
     _: Account = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Dashboard four-card overview + recent-anomaly list (M3, US-M3-11, R6).
+    """Dashboard four-card overview + quarantined models (alias+model).
 
     - today_calls / today_spend_usd / active_keys (MAK daily view) / error_rate
-      (share of today's calls with status != success).
-    - anomalies: providers flagged quota_exhausted / degraded / down (from Redis).
+    - quarantined: models auto-removed from aliases after QUOTA_EXHAUSTED
+    - anomalies: remaining Redis runtime flags (degraded / down / non-alias quota)
     """
-    # created_at is persisted as naive UTC (see models._now); build the same
-    # space-separated midnight datetime so SQLite string comparison matches.
-    # Passing a Python datetime (not an isoformat "T"-separated string) avoids the
-    # prior bug where every row sorted before the threshold and the overview returned 0.
     today_start = (
         datetime.datetime.now(datetime.timezone.utc)
         .replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
@@ -830,11 +827,39 @@ async def dashboard_overview(
     error_rate = (errors / total) if total else 0.0
     active_keys = len({r.vk_id for r in rows if r.vk_id})
 
+    quarantined = await list_quarantined(db)
     anomalies = await list_flagged()
     return {
         "today_calls": total,
         "today_spend_usd": round(spend, 6),
         "error_rate": round(error_rate, 4),
         "active_keys": active_keys,
+        "quarantined": quarantined,
         "anomalies": anomalies,
     }
+
+
+@router.post("/quarantine/{qid}/restore")
+async def quarantine_restore(
+    qid: str,
+    _: Account = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Put a quarantined model back onto its alias candidate list."""
+    try:
+        return await restore_quarantined(qid, db)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="quarantine entry not found")
+
+
+@router.delete("/quarantine/{qid}")
+async def quarantine_delete(
+    qid: str,
+    _: Account = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently drop the quarantine record (model stays out of the alias)."""
+    try:
+        return await delete_quarantined(qid, db)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="quarantine entry not found")

@@ -6,5 +6,6 @@ python-dotenv>=1.0,<2.0
 # M1: pure-python deps only (no native extensions, R2)
 sqlalchemy>=2.0,<3.0
 aiosqlite>=0.19,<0.21
+asyncpg>=0.29,<0.31  # Postgres driver when DATABASE_URL=postgresql+asyncpg://...
 pyjwt>=2.8,<3.0
 redis>=5.0,<6.0  # optional in M1; provider health status (§2.8)

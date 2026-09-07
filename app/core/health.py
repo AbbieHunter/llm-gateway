@@ -74,6 +74,18 @@ async def set_status(provider_id: str, status: str) -> None:
     metrics.record_provider_status(provider_id, status)
 
 
+async def clear_status(provider_id: str) -> None:
+    """Remove the runtime status key (treat as healthy). Used after quarantine."""
+    client = _get_client()
+    if client is None:
+        return
+    try:
+        await client.delete(_STATUS_KEY.format(id=provider_id))
+    except Exception:  # noqa: BLE001
+        pass
+    metrics.record_provider_status(provider_id, _HEALTHY)
+
+
 async def list_flagged() -> list[dict[str, str]]:
     """Return providers whose status != healthy, as [{'id', 'status'}].
 

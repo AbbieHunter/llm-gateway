@@ -11,7 +11,7 @@ from __future__ import annotations
 import datetime
 import uuid
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, ForeignKey
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -92,6 +92,23 @@ class ModelRoute(Base):
     # JSON ordered list of LiteLLM model strings, e.g. ["openai/gpt-4o-mini","deepseek/deepseek-chat"]
     providers: Mapped[str] = mapped_column(Text, nullable=False)
     strategy: Mapped[str] = mapped_column(String, default="failover")  # failover | weighted
+
+
+class QuarantinedModel(Base):
+    """Models removed from an alias after persistent quota exhaustion.
+
+    Unlike Redis `quota_exhausted` (temporary, probe-recoverable), rows here are
+    durable: the model stays out of the alias until an admin restores or deletes.
+    """
+
+    __tablename__ = "quarantined_models"
+    __table_args__ = (UniqueConstraint("alias", "model", name="uq_quarantine_alias_model"),)
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    alias: Mapped[str] = mapped_column(String, nullable=False)
+    model: Mapped[str] = mapped_column(String, nullable=False)  # full LiteLLM model string
+    reason: Mapped[str] = mapped_column(String, default="quota_exhausted")
+    quarantined_at: Mapped[datetime.datetime] = mapped_column(DateTime, default=_now)
 
 
 class Session(Base):

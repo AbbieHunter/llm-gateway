@@ -41,6 +41,7 @@ RUN mkdir -p /app/app && cd /app/frontend && VITE_API_BASE=${VITE_API_BASE} npm 
 # above. With this order a backend-only change rebuilds only these two COPYs.
 COPY app ./app
 COPY scripts ./scripts
+RUN chmod +x /app/scripts/entrypoint.sh
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/scripts/entrypoint.sh"]

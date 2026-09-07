@@ -1,0 +1,53 @@
+# ============================================================================
+# Optional Postgres + multi-worker overlay for scale-out.
+# Default prod compose stays on SQLite (fits the small cloud box).
+# When usage_logs / concurrency outgrow single-file SQLite:
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml \
+#     up -d --build
+#
+# Migrate existing SQLite data once (empty target only):
+#   SOURCE_SQLITE=./data/gateway.db \
+#   DATABASE_URL=postgresql+asyncpg://gateway:gateway@postgres:5432/gateway \
+#   python scripts/migrate_sqlite_to_postgres.py
+# ============================================================================
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gateway
+      POSTGRES_PASSWORD: gateway
+      POSTGRES_DB: gateway
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gateway -d gateway"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - default
+
+  gateway:
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      - REDIS_FAKE=0
+      - MOCK_PROVIDER=0
+      - REDIS_URL=redis://redis:6379
+      - SEMANTIC_CACHE_ENABLE=1
+      - DATABASE_URL=postgresql+asyncpg://gateway:gateway@postgres:5432/gateway
+      - UVICORN_WORKERS=${UVICORN_WORKERS:-2}
+      - DATA_DIR=/app/data
+
+volumes:
+  postgres-data:
+
+networks:
+  default:
+    external: true
+    name: card-rules-assistant_default
